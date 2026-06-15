@@ -246,7 +246,40 @@ async function planResearch(res, spec) {
   } catch (e) { json(res, 500, { error: String(e.message || e) }); }
 }
 
+function sanitizeSpec(p, spec) {
+  const cl = (v, lo, hi, d) => { v = Math.round(+v); return isNaN(v) ? d : Math.max(lo, Math.min(hi, v)); };
+  const styles = { modern: 1, traditional: 1, minimalist: 1, scandinavian: 1, industrial: 1 };
+  return {
+    plotW: (+p.plotW >= 6 && +p.plotW <= 80) ? +p.plotW : spec.plotW,
+    plotD: (+p.plotD >= 6 && +p.plotD <= 80) ? +p.plotD : spec.plotD,
+    floors: cl(p.floors, 1, 4, spec.floors), bedrooms: cl(p.bedrooms, 0, 12, spec.bedrooms),
+    bathrooms: cl(p.bathrooms, 0, 8, spec.bathrooms), kitchens: cl(p.kitchens, 0, 4, spec.kitchens),
+    living: cl(p.living, 0, 4, spec.living),
+    dining: typeof p.dining === 'boolean' ? p.dining : spec.dining,
+    garage: typeof p.garage === 'boolean' ? p.garage : spec.garage,
+    style: styles[p.style] ? p.style : spec.style
+  };
+}
+async function extractFromPrompt(spec) {
+  const fp = footprint(spec);
+  const sys = 'You are a residential architect. Read the brief and return ONLY JSON. Extract build parameters, a short concept, and OPTIONALLY a bespoke layout. ' +
+    'Layout coordinates are metres inside the building footprint: x from 0 to ' + fp.fw.toFixed(1) + ', y from 0 to ' + fp.fh.toFixed(1) + ', origin top-left, the street/entrance is at the bottom (y=' + fp.fh.toFixed(1) + '). Rooms must NOT overlap and must stay inside the footprint. If unsure of exact coordinates, OMIT "floors" and return only params + concept.';
+  const shape = '{"params":{"plotW":m,"plotD":m,"floors":1-4,"bedrooms":int,"bathrooms":int,"kitchens":int,"living":int,"dining":bool,"garage":bool,"style":"modern|traditional|minimalist|scandinavian|industrial"},"concept":"1-2 sentences","floors":[{"rooms":[{"type":"living|bedroom|kitchen|bathroom|dining|garage|corridor","name":"","x":m,"y":m,"w":m,"h":m,"door":{"side":"left|right|top|bottom","pos":m,"width":0.9}}],"corridor":{"x":m,"y":m,"w":m,"h":m},"entrance":{"x":m,"y":m,"width":1.2},"stairs":{"x":m,"y":m,"w":m,"h":m}}]}';
+  const user = 'Brief: "' + String(spec.prompt).slice(0, 700) + '"\nCurrent settings: ' + JSON.stringify({ plotW: spec.plotW, plotD: spec.plotD, floors: spec.floors, bedrooms: spec.bedrooms, bathrooms: spec.bathrooms, kitchens: spec.kitchens, living: spec.living, dining: spec.dining, garage: spec.garage, style: spec.style }) + '\nReturn JSON exactly of this shape: ' + shape;
+  const data = await postJSON('chat/completions', { model: PLAN_MODEL, temperature: 0.3, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] });
+  return JSON.parse((data.choices && data.choices[0] && data.choices[0].message.content) || '{}');
+}
+
 async function aiFloorPlan(res, spec) {
+  let promptConcept = '', aiCustom = null;
+  if (spec.prompt && key()) {
+    try {
+      const ex = await extractFromPrompt(spec);
+      if (ex.params) Object.assign(spec, sanitizeSpec(ex.params, spec));
+      promptConcept = ex.concept || '';
+      if (ex.floors && ex.floors.length) { const cl = HouseLayout.fromAI({ floors: ex.floors, concept: ex.concept }, spec); if (cl) aiCustom = cl; }
+    } catch (_) { /* fall back to template */ }
+  }
   const fp = footprint(spec);
   const research = await planResearchWeb(spec);
   const catalog = PlanTemplates.listTemplates();
@@ -276,18 +309,19 @@ async function aiFloorPlan(res, spec) {
     } catch (_) { /* keep local pick */ }
   }
 
-  let layout = HouseLayout.buildFromTemplate(spec, templateId);
+  let layout = aiCustom || HouseLayout.buildFromTemplate(spec, templateId);
   if (!layout) layout = HouseLayout.computeLayout(spec);
 
   json(res, 200, {
     layout: layout,
-    concept: concept,
+    spec: { plotW: spec.plotW, plotD: spec.plotD, floors: spec.floors, bedrooms: spec.bedrooms, bathrooms: spec.bathrooms, kitchens: spec.kitchens, living: spec.living, dining: spec.dining, garage: spec.garage, style: spec.style },
+    concept: promptConcept || concept,
     inspiration: inspiration,
     templateId: templateId,
     researchQuery: research.query,
     researchHits: research.hits.length,
     researchEngine: research.engine,
-    source: layout.planSource === 'template' ? 'pro-template' : 'built-in',
+    source: aiCustom ? 'ai-custom' : (layout.planSource === 'template' ? 'pro-template' : 'built-in'),
     planModel: PLAN_MODEL
   });
 }
@@ -295,14 +329,16 @@ async function aiFloorPlan(res, spec) {
 /* Free CC0 material textures (Poly Haven, no key) proxied so the browser can
  * load them same-origin and map them onto the 3D house. Falls back silently. */
 const TEX_SLUGS = { wood:'wood_floor', tile:'floor_tiles_06', brick:'red_brick_03', plaster:'beige_wall_001', siding:'wood_planks', shingle:'roof_tiles', concrete:'concrete_floor_02', marble:'marble_01', carpet:'carpet', grass:'aerial_grass_rock' };
-async function texture(res, name) {
+async function texture(res, name, map) {
   const slug = TEX_SLUGS[name];
   if (!slug) { res.writeHead(404); return res.end('unknown texture'); }
   try {
     const fr = await fetch('https://api.polyhaven.com/files/' + slug, { headers: { Accept: 'application/json' } });
     if (!fr.ok) throw new Error('polyhaven ' + fr.status);
     const files = await fr.json();
-    const diff = files.Diffuse || files.diffuse || files.Color || files.col || files.albedo;
+    const diff = map === 'nor' ? (files.nor_gl || files.Normal || files.nor_dx)
+      : map === 'rough' ? (files.Rough || files.rough || files.roughness)
+      : (files.Diffuse || files.diffuse || files.Color || files.col || files.albedo);
     const r1 = diff && (diff['1k'] || diff['2k'] || diff[Object.keys(diff)[0]]);
     const fm = r1 && (r1.jpg || r1.png || r1[Object.keys(r1)[0]]);
     const url = fm && fm.url;
@@ -344,7 +380,7 @@ http.createServer(async (req, res) => {
   if (req.method === 'POST' && u.pathname === '/api/ai/floor-plan') return aiFloorPlan(res, await readBody(req));
   if (req.method === 'POST' && u.pathname === '/api/ai/render') return render(res, await readBody(req));
   if (req.method === 'GET' && u.pathname === '/api/reference-images') return referenceImages(res, (u.searchParams.get('q') || 'house interior').slice(0, 120));
-  if (req.method === 'GET' && u.pathname === '/api/texture') return texture(res, (u.searchParams.get('name') || '').slice(0, 20));
+  if (req.method === 'GET' && u.pathname === '/api/texture') return texture(res, (u.searchParams.get('name') || '').slice(0, 20), (u.searchParams.get('map') || '').slice(0, 8));
   serveStatic(req, res);
 }).listen(PORT, () => console.log('\n  ForthHome AI House Designer:  http://localhost:' + PORT +
   '\n  OpenAI: ' + (key() ? ('key present — plans ' + PLAN_MODEL + ', text ' + TEXT_MODEL + ', images ' + IMAGE_MODEL) : 'NOT configured') +

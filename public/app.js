@@ -48,6 +48,33 @@ async function generate(silent) {
     }
   } finally { btn.disabled = false; }
 }
+function applySpecToForm(s) {
+  if (!s) return;
+  ['plotW', 'plotD', 'floors', 'bedrooms', 'bathrooms', 'kitchens', 'living'].forEach(function (k) { if (s[k] != null && $(k)) $(k).value = s[k]; });
+  if (typeof s.dining === 'boolean') $('dining').checked = s.dining;
+  if (typeof s.garage === 'boolean') $('garage').checked = s.garage;
+  if (s.style && $('style')) $('style').value = s.style;
+  syncChips(); updateArea();
+}
+async function generateFromPrompt() {
+  var prompt = ($('promptText').value || '').trim();
+  if (!prompt) { toast('Describe your home first'); $('promptText').focus(); return; }
+  cfg = readForm(); cfg.prompt = prompt;
+  var btn = $('promptBtn'), label = btn.textContent; btn.disabled = true;
+  btn.innerHTML = '<span class="spin" style="width:15px;height:15px;border-width:2px;display:inline-block;vertical-align:-3px"></span> Designing…';
+  toast('AI is designing your home…');
+  try {
+    var r = await fetch('/api/ai/floor-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+    var d = await r.json();
+    if (!r.ok || !d.layout) throw new Error((d && d.error) || 'AI plan failed');
+    if (d.spec) { applySpecToForm(d.spec); cfg = readForm(); cfg.prompt = prompt; }
+    applyLayout(d.layout, { concept: d.concept, inspiration: d.inspiration, source: d.source, templateId: d.templateId, hits: d.researchHits });
+    toast(d.source === 'ai-custom' ? 'Custom AI floor plan ready' : (d.concept ? d.concept.slice(0, 90) : 'Design ready'));
+  } catch (e) {
+    toast('AI: ' + e.message + ' — using the settings instead');
+    generate(false);
+  } finally { btn.disabled = false; btn.textContent = label; }
+}
 function buildFloorBars() {
   var defs = [['floorBar', function (i) { currentFloor = i; drawPlan(); }], ['floorBar3d', function (i) { if (viewer) viewer.setFloor(i); }]];
   defs.forEach(function (pair) {
@@ -195,6 +222,8 @@ function randomize() { $('plotW').value = 12 + Math.floor(Math.random() * 16); $
 function boot() {
   try { if (window.House3D && window.House3D.Viewer) viewer = new window.House3D.Viewer($('view3d')); } catch (e) {}
   $('generateBtn').onclick = function () { generate(false); }; $('randomBtn').onclick = randomize;
+  $('promptBtn').onclick = generateFromPrompt;
+  $('promptText').addEventListener('keydown', function (e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') generateFromPrompt(); });
   ['plotW', 'plotD'].forEach(function (id) { $(id).addEventListener('input', updateArea); });
   $('dining').onchange = syncChips; $('garage').onchange = syncChips;
   $('aiPlans').onchange = function () { aiPlansOn = $('aiPlans').checked; $('aiPlanChip').classList.toggle('on', aiPlansOn); };

@@ -24,6 +24,10 @@
   .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
   .field{margin-bottom:10px}label{display:block;font-size:11.5px;color:var(--mut);margin-bottom:5px}
   input[type=number],select{width:100%;background:var(--p2);border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:9px;font-size:14px}
+  textarea{width:100%;background:var(--p2);border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:10px;font-size:13px;font-family:inherit;resize:vertical;line-height:1.5}
+  textarea:focus{outline:none;border-color:var(--acc)}
+  .promptsec{background:linear-gradient(180deg,#1b2230,#161b24);border:1px solid #2b3550;border-radius:13px;padding:13px;margin-bottom:18px}
+  .promptsec h2{margin-top:0}
   input:focus,select:focus{outline:none;border-color:var(--acc)}
   .chips{display:flex;gap:8px}.chip{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;font-size:13px;color:var(--mut);cursor:pointer;background:var(--p2);border:1px solid var(--line);border-radius:9px;padding:9px;user-select:none}
   .chip input{display:none}.chip.on{color:#fff;border-color:var(--acc);background:#1d2533}
@@ -94,6 +98,12 @@
   </header>
 
   <aside>
+    <div class="sec promptsec">
+      <h2>✨ Describe your dream home</h2>
+      <textarea id="promptText" rows="3" placeholder="e.g. A 4-bedroom modern villa with an open-plan kitchen + dining, a home office, a double garage and a large master suite with ensuite"></textarea>
+      <button class="primary" id="promptBtn" style="margin-top:9px">Design from prompt ✨</button>
+      <div class="hint">AI reads your words, fills the settings below, and designs the floor plan + walkable 3D house (GPT-4o + free web research). Ctrl/Cmd+Enter to run.</div>
+    </div>
     <div class="sec">
       <h2>Land &amp; structure</h2>
       <div class="row">
@@ -193,7 +203,7 @@
 <script src="/vendor/PointerLockControls.js"></script>
 <script src="plan-templates.js?v=1"></script>
 <script src="layout.js?v=4"></script>
-<script src="house3d.js?v=2"></script>
-<script src="app.js?v=4"></script>
+<script src="house3d.js?v=3"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>
