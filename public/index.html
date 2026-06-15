@@ -126,6 +126,7 @@
         <option value="industrial">Industrial</option>
       </select></div>
       <button class="primary" id="generateBtn">Generate house</button>
+      <div class="chips" style="margin-top:10px"><label class="chip on" id="aiPlanChip"><input id="aiPlans" type="checkbox" checked> Smart plan picker (GPT-4o)</label></div>
       <div class="mini"><button class="ghost" id="randomBtn">🎲 Surprise me</button></div>
     </div>
     <div class="sec">
@@ -137,7 +138,7 @@
           <button class="ghost" id="schemeBtn">Design scheme</button>
           <button class="ghost" id="diagBtn">Test OpenAI</button>
         </div>
-        <div class="hint">Photoreal renders (Renders tab) need your OpenAI org <b>verified</b> for <code>gpt-image-1</code>.</div>
+        <div class="hint">Floor plans use GPT-4o + free web search (DuckDuckGo). Renders need org verified for <code>gpt-image-1</code>.</div>
       </div>
     </div>
     <div class="sec">
@@ -190,8 +191,9 @@
 <script src="/vendor/three.min.js"></script>
 <script src="/vendor/OrbitControls.js"></script>
 <script src="/vendor/PointerLockControls.js"></script>
-<script src="layout.js"></script>
-<script src="house3d.js"></script>
-<script src="app.js"></script>
+<script src="plan-templates.js?v=1"></script>
+<script src="layout.js?v=4"></script>
+<script src="house3d.js?v=2"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>

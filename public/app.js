@@ -5,7 +5,7 @@
 var $ = function (id) { return document.getElementById(id); };
 var fmt = function (n) { return Math.round(n).toLocaleString(); };
 var M2FT = 10.7639;
-var cfg = null, L = null, currentFloor = 0, brief = null, refs = [], viewer = null, cut = false;
+var cfg = null, L = null, currentFloor = 0, brief = null, refs = [], viewer = null, cut = false, planMeta = null, aiPlansOn = true;
 
 var FILL = { living:'#e9f0f7', bedroom:'#eef1ea', kitchen:'#f5efe5', bathroom:'#e5f1f1', dining:'#f1edf6', garage:'#ededed', corridor:'#e1e5ea', room:'#eef0f2' };
 var WALL = '#1f242c', FURN = '#7b8694', LBL = '#252b33', WIN = '#3f7bbf';
@@ -18,12 +18,35 @@ function readForm() {
     kitchens: Math.max(0, Math.round(n('kitchens', 1))), living: Math.max(0, Math.round(n('living', 1))),
     dining: $('dining').checked, garage: $('garage').checked, style: $('style').value };
 }
-function generate(silent) {
-  cfg = readForm(); L = window.HouseLayout.computeLayout(cfg); currentFloor = 0;
+function applyLayout(layout, meta) {
+  L = layout; planMeta = meta || null; currentFloor = 0;
   $('welcome').style.display = 'none'; $('stage').style.display = 'flex';
   buildFloorBars(); updateArea(); drawPlan(); tab('three');
-  if (viewer) { viewer._resize(); viewer.build(L, cfg); if (!silent) toast('House ready — try Walk mode to explore'); }
+  if (viewer) { viewer._resize(); viewer.build(L, cfg); }
   else { view3dMsg('The 3D engine (Three.js) did not load. Run <b>node server.js</b> and open <b>http://localhost:3000</b> in a modern browser.'); }
+}
+async function generate(silent) {
+  cfg = readForm();
+  var btn = $('generateBtn'); btn.disabled = true;
+  if (!silent) toast('Designing floor plan…');
+  try {
+    var usedAI = false;
+    if (aiPlansOn) {
+      try {
+        var r = await fetch('/api/ai/floor-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+        var d = await r.json();
+        if (r.ok && d.layout) {
+          applyLayout(d.layout, { concept: d.concept, inspiration: d.inspiration, source: d.source, hits: d.researchHits, templateId: d.templateId });
+          usedAI = true;
+          if (!silent) toast((d.source === 'pro-template' ? 'Pro floor plan (' + (d.templateId || 'template') + ')' : 'Floor plan ready') + (d.researchHits ? ' · ' + d.researchHits + ' web refs' : ''));
+        }
+      } catch (e) { /* fall through */ }
+    }
+    if (!usedAI) {
+      applyLayout(window.HouseLayout.computeLayout(cfg), { source: 'pro-template' });
+      if (!silent) toast('Pro floor plan ready');
+    }
+  } finally { btn.disabled = false; }
 }
 function buildFloorBars() {
   var defs = [['floorBar', function (i) { currentFloor = i; drawPlan(); }], ['floorBar3d', function (i) { if (viewer) viewer.setFloor(i); }]];
@@ -76,18 +99,34 @@ function drawPlan() {
   var p = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="' + vbX + ' ' + vbY + ' ' + vbW + ' ' + vbH + '" style="width:100%;height:100%">'];
   p.push(R(vbX, vbY, vbW, vbH, '#ffffff'));
   p.push(R(f.x, f.y, f.w, f.h, '#f4f6f8', WALL, 0.22));
-  if (fl.corridor) { p.push(R(fl.corridor.x, fl.corridor.y, fl.corridor.w, fl.corridor.h, FILL.corridor)); p.push(T(fl.corridor.x + fl.corridor.w / 2, fl.corridor.y + fl.corridor.h - 0.4, 'HALL', 0.42, '#7b8694')); }
+  if (fl.corridor) { p.push(R(fl.corridor.x, fl.corridor.y, fl.corridor.w, fl.corridor.h, FILL.corridor)); p.push(T(fl.corridor.x + fl.corridor.w / 2, fl.corridor.y + fl.corridor.h / 2, fl.corridor.h > 2 ? 'HALL' : 'ENTRY', 0.42, '#7b8694')); }
   fl.rooms.forEach(function (rm) {
+    if (rm.type === 'corridor' && fl.corridor && Math.abs(rm.x - fl.corridor.x) < 0.05 && Math.abs(rm.y - fl.corridor.y) < 0.05) return;
+    if (rm.type === 'corridor') {
+      var fill = rm.name === 'Hall' ? FILL.living : FILL.corridor;
+      p.push(R(rm.x, rm.y, rm.w, rm.h, fill, rm.name === 'Hall' ? 'none' : WALL, rm.name === 'Hall' ? 0 : 0.1));
+      if (rm.name !== 'Hall') p.push(T(rm.x + rm.w / 2, rm.y + rm.h / 2, rm.name, 0.42, '#7b8694'));
+      return;
+    }
     p.push(R(rm.x, rm.y, rm.w, rm.h, FILL[rm.type] || FILL.room, WALL, 0.12) + furnitureSVG(rm) + doorSVG(rm) + windowSVG(rm));
     if (rm.w > 1.6 && rm.h > 1.1) { p.push(T(rm.x + rm.w / 2, rm.y + rm.h / 2, rm.name, Math.min(0.6, rm.w / 8), LBL, 'middle', '600')); p.push(T(rm.x + rm.w / 2, rm.y + rm.h / 2 + 0.6, rm.area.toFixed(1) + ' m²', 0.42, '#7b8694')); }
   });
   if (fl.entrance) { p.push(R(fl.entrance.x - fl.entrance.width / 2, fl.entrance.y - 0.13, fl.entrance.width, 0.26, '#fff')); p.push(T(fl.entrance.x, fl.entrance.y + 0.7, '▲ ENTRANCE', 0.4, '#34a07a')); }
+  if (fl.stairs) {
+    var st = fl.stairs;
+    p.push(R(st.x, st.y, st.w, st.h, '#ddd8cf', WALL, 0.08));
+    for (var si = 0; si < 5; si++) p.push(R(st.x + 0.08, st.y + 0.08 + si * (st.h / 5), st.w - 0.16, st.h / 5 - 0.04, 'none', '#b8b0a4', 0.04));
+    p.push(T(st.x + st.w / 2, st.y + st.h / 2, 'STAIRS', 0.38, '#7b8694'));
+  }
   p.push(dimSVG(L));
   var nx = f.x + f.w + 1.4, ny = f.y + 0.2;
   p.push('<circle cx="' + nx + '" cy="' + ny + '" r="0.6" fill="none" stroke="#9aa3af" stroke-width="0.04"/><path d="M ' + nx + ' ' + (ny - 0.5) + ' L ' + (nx - 0.22) + ' ' + (ny + 0.2) + ' L ' + nx + ' ' + (ny - 0.05) + ' L ' + (nx + 0.22) + ' ' + (ny + 0.2) + ' z" fill="#5a6573"/>' + T(nx, ny + 0.9, 'N', 0.45, '#5a6573'));
   var ty = f.y + f.h + 2.2;
-  p.push(T(f.x, ty, (cfg.style.charAt(0).toUpperCase() + cfg.style.slice(1)) + ' house — Level ' + (currentFloor + 1), 0.62, LBL, 'start', '700'));
+  var title = (cfg.style.charAt(0).toUpperCase() + cfg.style.slice(1)) + ' house — Level ' + (currentFloor + 1);
+  if (planMeta && (planMeta.source === 'pro-template' || planMeta.source === 'template')) title += ' (pro plan)';
+  p.push(T(f.x, ty, title, 0.62, LBL, 'start', '700'));
   p.push(T(f.x, ty + 0.85, cfg.bedrooms + ' bed · ' + cfg.bathrooms + ' bath · ' + cfg.floors + ' floor(s) · ' + fmt(cfg.plotW * cfg.plotD) + ' m² plot', 0.46, '#7b8694', 'start'));
+  if (planMeta && planMeta.concept) p.push(T(f.x, ty + 1.55, planMeta.concept.slice(0, 120), 0.42, '#5a6573', 'start'));
   p.push('</svg>'); $('planHost').innerHTML = p.join('');
 }
 function downloadPlanSVG() { dl(new Blob([$('planHost').innerHTML], { type: 'image/svg+xml' }), 'floorplan-L' + (currentFloor + 1) + '.svg'); }
@@ -103,7 +142,10 @@ function tab(name) { ['three', 'plan', 'renders', 'scheme'].forEach(function (t)
 function view3dMsg(m){var v=document.getElementById('view3d');if(v)v.innerHTML='<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:#cdd6e4;background:#12151c;padding:26px;font:14px Inter,sans-serif;line-height:1.7">'+m+'</div>';}
 function toast(m) { var t = $('toast'); t.textContent = m; t.style.opacity = '1'; clearTimeout(t._t); t._t = setTimeout(function () { t.style.opacity = '0'; }, 3600); }
 function paletteText() { if (!brief || !brief.palette) return ''; return brief.palette.map(function (p) { return (p.name || '') + ' ' + p.hex; }).join(', '); }
-async function checkAI() { try { var r = await fetch('/api/ai/status'); var d = await r.json(); if (!d.openai) { setAIBanner('warn', 'No OpenAI key in .env. The 3D model + plan work without it; add a key for photoreal renders.'); return; } setAIBanner('', 'Checking OpenAI access…'); diagnoseAI(true); } catch (e) { setAIBanner('warn', 'Run via the server (node server.js) to enable AI features.'); } }
+async function checkAI() { try { var r = await fetch('/api/ai/status'); var d = await r.json();
+  if ($('aiPlanChip')) $('aiPlanChip').classList.toggle('on', true);
+  setAIBanner('ok', 'Pro floor plans (' + (d.templates || 3) + ' templates). GPT-4o picks the best layout using <b>free DuckDuckGo</b> web research — no extra API key needed.');
+  } catch (e) { setAIBanner('warn', 'Run via the server (node server.js).'); } }
 async function diagnoseAI(silent) { try { var r = await fetch('/api/ai/diagnose'); var d = await r.json(); setAIBanner(d.ok ? 'ok' : 'warn', d.message); if (!silent) toast(d.message); } catch (e) { setAIBanner('warn', 'Could not reach OpenAI: ' + e.message); } }
 function setAIBanner(kind, msg) { var b = $('aiBanner'); b.className = 'aibanner ' + kind; b.innerHTML = msg; }
 async function genScheme() { if (!cfg) return; var btn = $('schemeBtn'); btn.disabled = true;
@@ -155,6 +197,7 @@ function boot() {
   $('generateBtn').onclick = function () { generate(false); }; $('randomBtn').onclick = randomize;
   ['plotW', 'plotD'].forEach(function (id) { $(id).addEventListener('input', updateArea); });
   $('dining').onchange = syncChips; $('garage').onchange = syncChips;
+  $('aiPlans').onchange = function () { aiPlansOn = $('aiPlans').checked; $('aiPlanChip').classList.toggle('on', aiPlansOn); };
   ['three', 'plan', 'renders', 'scheme'].forEach(function (t) { $('tab-' + t).onclick = function () { tab(t); }; });
   $('dlSvg').onclick = downloadPlanSVG; $('dlPng').onclick = downloadPlanPNG;
   $('schemeBtn').onclick = genScheme; $('diagBtn').onclick = function () { diagnoseAI(false); };
