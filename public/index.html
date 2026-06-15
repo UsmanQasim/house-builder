@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ForthHome - AI House Builder</title>
+<style>
+  :root{
+    --bg:#0e1014; --panel:#14171e; --panel2:#1c212b; --panel3:#232a36;
+    --line:#2b3340; --txt:#eef1f6; --muted:#94a1b4;
+    --muted2:#6b7686; --accent:#6c8cff; --accent2:#34d0a4; --warn:#ffb454; --danger:#ff6b6b;
+    --radius:14px; --shadow:0 10px 30px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--txt);overflow:hidden}
+  button{font-family:inherit}
+  ::-webkit-scrollbar{width:9px}::-webkit-scrollbar-thumb{background:#2b3340;border-radius:8px}
+  #app{display:grid;grid-template-columns:344px 1fr;grid-template-rows:58px 1fr;height:100vh;width:100vw}
+
+  header{grid-column:1 / span 2;display:flex;align-items:center;gap:14px;padding:0 18px;background:linear-gradient(180deg,#171b23,#13161d);border-bottom:1px solid var(--line);z-index:5}
+  .logo{font-weight:800;letter-spacing:.3px;font-size:16px}
+  .logo .dot{color:var(--accent)}
+  .logo small{display:block;font-weight:500;font-size:10px;color:var(--muted);letter-spacing:.16em;text-transform:uppercase;margin-top:1px}
+  .spacer{flex:1}
+  .seg{display:flex;background:var(--panel2);border:1px solid var(--line);border-radius:11px;overflow:hidden}
+  .seg button{background:transparent;color:var(--muted);border:0;padding:9px 16px;cursor:pointer;font-size:13px;font-weight:600;transition:.15s}
+  .seg button.active{background:var(--accent);color:#fff}
+  .floors{display:flex;gap:6px}
+  .fbtn{background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:9px;padding:7px 12px;cursor:pointer;font-size:13px;font-weight:600}
+  .fbtn.active{border-color:var(--accent);color:#fff;background:#1d2533}
+  .ghost{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:8px 13px;cursor:pointer;font-size:13px;font-weight:600;transition:.15s}
+  .ghost:hover{border-color:var(--accent);background:var(--panel3)}
+  .ghost:disabled{opacity:.45;cursor:not-allowed}
+
+  aside{background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;padding:18px}
+  .sec{margin-bottom:20px}
+  .sec h2{font-size:11px;text-transform:uppercase;letter-spacing:.15em;color:var(--muted);margin:0 0 11px;display:flex;align-items:center;gap:8px}
+  .sec h2 .ic{width:18px;height:18px;display:inline-grid;place-items:center;background:var(--panel3);border-radius:6px;font-size:11px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px}
+  .field{margin-bottom:11px}
+  label{display:block;font-size:11.5px;color:var(--muted);margin-bottom:6px;font-weight:500}
+  input[type=number],select,input[type=text]{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:10px;font-size:14px;transition:.15s}
+  input:focus,select:focus{outline:none;border-color:var(--accent);background:#1a212c}
+  .chips{display:flex;gap:8px;flex-wrap:wrap}
+  .chip{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;font-size:13px;color:var(--muted);cursor:pointer;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:9px;user-select:none}
+  .chip input{display:none}
+  .chip.on{color:#fff;border-color:var(--accent);background:#1d2533}
+  .stat{font-size:12px;color:var(--muted);margin:-2px 0 0}
+  .stat b{color:var(--accent2);font-weight:700}
+  .primary{width:100%;background:linear-gradient(180deg,#7a97ff,#5b7cf6);color:#fff;border:0;border-radius:11px;padding:13px;font-size:15px;font-weight:700;cursor:pointer;box-shadow:0 6px 18px rgba(91,124,246,.35)}
+  .primary:hover{filter:brightness(1.06)}
+  .primary:active{transform:translateY(1px)}
+  .mini{display:flex;gap:9px;margin-top:9px}
+  .mini button{flex:1}
+  .hint{font-size:11.5px;color:var(--muted2);line-height:1.55;margin-top:8px}
+  .aibox{background:linear-gradient(180deg,#191f2b,#161b24);border:1px solid var(--line);border-radius:12px;padding:13px}
+  .aibadge{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#0e1014;background:linear-gradient(90deg,#34d0a4,#6c8cff);padding:3px 8px;border-radius:20px}
+  .swatches{display:flex;gap:6px;margin:10px 0 6px;flex-wrap:wrap}
+  .sw{width:30px;height:30px;border-radius:7px;border:1px solid rgba(255,255,255,.14);position:relative}
+  .sw span{position:absolute;bottom:-15px;left:50%;transform:translateX(-50%);font-size:8px;color:var(--muted)}
+  .concept{font-size:12.5px;line-height:1.55;color:#cdd6e4;margin:8px 0}
+  .roomnotes{font-size:11.5px;color:var(--muted);line-height:1.5;margin-top:6px;max-height:120px;overflow:auto}
+  .roomnotes b{color:#cdd6e4}
+  .gallery{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+  .gallery img{width:100%;height:84px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:pointer}
+  .gcell{position:relative;height:84px;border-radius:8px;border:1px dashed var(--line);display:grid;place-items:center;color:var(--muted);font-size:11px;background:var(--panel2)}
+  .refstrip{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}
+  .refstrip img{width:64px;height:48px;object-fit:cover;border-radius:7px;border:1px solid var(--line);cursor:pointer}
+  .spin{width:16px;height:16px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;display:inline-block;animation:sp 0.8s linear infinite;vertical-align:-3px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  main{position:relative;overflow:hidden;background:radial-gradient(1200px 700px at 60% -20%, #2a3344, #0e1014)}
+  #stage{position:absolute;inset:0}#stage canvas{display:block}
+  #planWrap{position:absolute;right:16px;bottom:16px;width:286px;background:rgba(14,16,20,.9);border:1px solid var(--line);border-radius:var(--radius);backdrop-filter:blur(8px);overflow:hidden;box-shadow:var(--shadow);transition:transform .22s}
+  #planWrap.collapsed{transform:translateY(calc(100% - 36px))}
+  #planHead{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:1px solid var(--line)}
+  #planCanvas{display:block;width:286px;height:214px;background:#0a0c10}
+  #hud{position:absolute;left:50%;top:16px;transform:translateX(-50%);background:rgba(14,16,20,.88);border:1px solid var(--line);border-radius:11px;padding:9px 16px;font-size:12.5px;color:var(--muted);display:none;box-shadow:var(--shadow)}
+  #hud b{color:#fff}
+  #center{position:absolute;left:50%;top:50%;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:#fff;box-shadow:0 0 0 2px rgba(0,0,0,.4);opacity:0;pointer-events:none}
+  #toast{position:absolute;left:50%;bottom:26px;transform:translateX(-50%);background:#12151c;border:1px solid var(--line);color:var(--txt);padding:11px 18px;border-radius:11px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;max-width:72%;box-shadow:var(--shadow)}
+  #welcome{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;text-align:center;color:var(--muted);pointer-events:none;padding:0 30px}
+  #welcome h1{color:#fff;font-size:24px;margin:0;font-weight:800}
+  #loading{position:absolute;inset:0;background:rgba(10,12,16,.62);display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px;z-index:8;backdrop-filter:blur(2px)}
+  #loading .big{width:46px;height:46px;border:4px solid rgba(255,255,255,.18);border-top-color:var(--accent);border-radius:50%;animation:sp 0.9s linear infinite}
+  #loadingText{color:#cdd6e4;font-size:13px}
+  .kbd{display:inline-block;background:var(--panel3);border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;padding:1px 7px;font-size:11px;color:#fff;font-weight:600}
+  a{color:var(--accent);text-decoration:none}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo">Forth<span class="dot">Home</span><small>AI House Builder</small></div>
+    <div class="spacer"></div>
+    <div class="floors" id="floorBar"></div>
+    <div class="seg" id="viewSeg">
+      <button data-mode="orbit" class="active">Orbit</button>
+      <button data-mode="walk">Walk</button>
+    </div>
+    <button class="ghost" id="cutawayBtn">Cutaway: off</button>
+    <button class="ghost" id="exportBtn">Export</button>
+  </header>
+
+  <aside>
+    <div class="sec">
+      <h2><span class="ic">#</span> Land &amp; structure</h2>
+      <div class="row">
+        <div class="field"><label>Plot width (m)</label><input id="plotW" type="number" min="6" max="80" value="18"></div>
+        <div class="field"><label>Plot depth (m)</label><input id="plotD" type="number" min="6" max="80" value="14"></div>
+      </div>
+      <div class="stat">Land area <b id="areaStat">252 m2</b> - <span id="areaFt">2,712 ft2</span></div>
+      <div class="row" style="margin-top:11px">
+        <div class="field"><label>Floors</label><input id="floors" type="number" min="1" max="4" value="2"></div>
+        <div class="field"><label>Wall height (m)</label><input id="wallH" type="number" min="2.4" max="4" step="0.1" value="3"></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2><span class="ic">R</span> Rooms</h2>
+      <div class="row3">
+        <div class="field"><label>Bedrooms</label><input id="bedrooms" type="number" min="0" max="12" value="3"></div>
+        <div class="field"><label>Bathrooms</label><input id="bathrooms" type="number" min="0" max="8" value="2"></div>
+        <div class="field"><label>Kitchens</label><input id="kitchens" type="number" min="0" max="4" value="1"></div>
+      </div>
+      <div class="field"><label>Living rooms</label><input id="living" type="number" min="0" max="4" value="1"></div>
+      <div class="chips">
+        <label class="chip on" id="diningChip"><input id="dining" type="checkbox" checked> Dining</label>
+        <label class="chip on" id="garageChip"><input id="garage" type="checkbox" checked> Garage</label>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2><span class="ic">*</span> Style</h2>
+      <div class="field">
+        <select id="style">
+          <option value="modern">Modern - flat roof, glass, warm wood</option>
+          <option value="traditional">Traditional - pitched roof, warm tones</option>
+          <option value="minimalist">Minimalist - mono, calm, airy</option>
+          <option value="scandinavian">Scandinavian - light, cozy, natural</option>
+          <option value="industrial">Industrial - concrete, black, brick</option>
+        </select>
+      </div>
+      <button class="primary" id="generateBtn">Generate house</button>
+      <div class="mini">
+        <button class="ghost" id="randomBtn">Surprise me</button>
+        <button class="ghost" id="resetCamBtn">Reset view</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2><span class="ic">AI</span> AI interior designer</h2>
+      <div class="aibox">
+        <span class="aibadge">OpenAI</span>
+        <span id="aiStatus" class="hint" style="margin-top:8px;display:block"></span>
+        <button class="ghost" id="briefBtn" style="width:100%;margin-top:10px">Generate design scheme</button>
+        <div id="briefOut" style="display:none">
+          <div class="concept" id="conceptTxt"></div>
+          <div class="swatches" id="swatches"></div>
+          <label class="chip on" id="applyChip" style="margin-top:14px"><input id="applyPalette" type="checkbox" checked> Apply palette to the 3D house</label>
+          <div class="roomnotes" id="roomNotes"></div>
+        </div>
+        <div class="field" style="margin:12px 0 0">
+          <label>Inspiration render</label>
+          <div style="display:flex;gap:8px">
+            <select id="inspRoom" style="flex:1">
+              <option value="living room">Living room</option>
+              <option value="master bedroom">Master bedroom</option>
+              <option value="kitchen">Kitchen</option>
+              <option value="bathroom">Bathroom</option>
+              <option value="dining room">Dining room</option>
+              <option value="house exterior">Exterior</option>
+            </select>
+            <button class="ghost" id="inspBtn">Render</button>
+          </div>
+        </div>
+        <div class="gallery" id="inspGallery"></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2><span class="ic">IMG</span> Reference images</h2>
+      <div class="mini">
+        <button class="ghost" id="uploadBtn">Upload</button>
+        <button class="ghost" id="netBtn">Search web</button>
+      </div>
+      <input id="fileInput" type="file" accept="image/*" multiple style="display:none">
+      <div class="field" id="netQueryWrap" style="display:none;margin-top:9px"><input id="netQuery" type="text" placeholder="e.g. scandinavian living room"></div>
+      <div class="refstrip" id="refStrip"></div>
+      <div class="hint" style="margin-top:14px"><b>Walk mode:</b> click the scene, then <span class="kbd">W</span><span class="kbd">A</span><span class="kbd">S</span><span class="kbd">D</span> + mouse - <span class="kbd">Shift</span> run - <span class="kbd">C</span> no-clip - <span class="kbd">Esc</span> release.</div>
+    </div>
+  </aside>
+
+  <main>
+    <div id="stage"></div>
+    <div id="center"></div>
+    <div id="hud"></div>
+    <div id="welcome"><h1>Design a home, then walk inside</h1><div>Set your land, rooms and style, then press <b>Generate house</b>. Add an OpenAI design scheme for intelligent interior colors.</div></div>
+    <div id="planWrap"><div id="planHead"><span id="planTitle">Floor plan</span><span>v</span></div><canvas id="planCanvas" width="286" height="214"></canvas></div>
+    <div id="loading"><div class="big"></div><div id="loadingText">Working...</div></div>
+    <div id="toast"></div>
+  </main>
+</div>
+
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/environments/RoomEnvironment.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/exporters/GLTFExporter.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
