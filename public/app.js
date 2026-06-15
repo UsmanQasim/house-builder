@@ -18,11 +18,12 @@ function readForm() {
     kitchens: Math.max(0, Math.round(n('kitchens', 1))), living: Math.max(0, Math.round(n('living', 1))),
     dining: $('dining').checked, garage: $('garage').checked, style: $('style').value };
 }
-function generate() {
+function generate(silent) {
   cfg = readForm(); L = window.HouseLayout.computeLayout(cfg); currentFloor = 0;
   $('welcome').style.display = 'none'; $('stage').style.display = 'flex';
-  buildFloorBars(); updateArea(); drawPlan();
-  if (viewer) { viewer._resize(); viewer.build(L, cfg); } else { view3dMsg('The 3D engine (Three.js) did not load. Make sure you opened <b>http://localhost:3000</b> in a normal browser <b>with internet access</b> (the 3D library loads from a CDN). If your network blocks it, tell me and I will bundle it into the app so it works offline.'); }
+  buildFloorBars(); updateArea(); drawPlan(); tab('three');
+  if (viewer) { viewer._resize(); viewer.build(L, cfg); if (!silent) toast('House ready — try Walk mode to explore'); }
+  else { view3dMsg('The 3D engine (Three.js) did not load. Run <b>node server.js</b> and open <b>http://localhost:3000</b> in a modern browser.'); }
 }
 function buildFloorBars() {
   var defs = [['floorBar', function (i) { currentFloor = i; drawPlan(); }], ['floorBar3d', function (i) { if (viewer) viewer.setFloor(i); }]];
@@ -121,13 +122,37 @@ async function renderView(view, label) { tab('renders'); var cell = document.cre
 /* ---------------- references ---------------- */
 function addRef(b64, type, durl) { refs.push({ b64: b64, type: type }); var im = document.createElement('div'); im.className = 'refthumb'; im.innerHTML = '<img src="' + durl + '"><button>×</button>'; im.querySelector('button').onclick = function () { var i = refs.findIndex(function (x) { return x.b64 === b64; }); if (i > -1) refs.splice(i, 1); im.remove(); }; $('refStrip').appendChild(im); }
 function handleFiles(files) { Array.prototype.forEach.call(files, function (file) { var rd = new FileReader(); rd.onload = function () { var img = new Image(); img.onload = function () { var mx = 768, sc = Math.min(1, mx / Math.max(img.width, img.height)); var c = document.createElement('canvas'); c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); var durl = c.toDataURL('image/png'); addRef(durl.split(',')[1], 'image/png', durl); }; img.src = rd.result; }; rd.readAsDataURL(file); }); }
+function pickWebImage(url) {
+  return new Promise(function (resolve, reject) {
+    var img = new Image(); img.crossOrigin = 'anonymous';
+    img.onload = function () { var mx = 768, sc = Math.min(1, mx / Math.max(img.width, img.height)); var c = document.createElement('canvas'); c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); var durl = c.toDataURL('image/png'); addRef(durl.split(',')[1], 'image/png', durl); resolve(); };
+    img.onerror = function () { reject(new Error('Could not load image')); }; img.src = url;
+  });
+}
+async function searchWeb() {
+  var q = ($('webQuery').value || '').trim() || (cfg ? cfg.style + ' house interior' : 'modern house interior');
+  var btn = $('webSearchBtn'); btn.disabled = true; $('webGrid').innerHTML = '<div class="hint">Searching…</div>';
+  try {
+    var r = await fetch('/api/reference-images?q=' + encodeURIComponent(q)); var d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Search failed');
+    if (!d.images || !d.images.length) { $('webGrid').innerHTML = '<div class="hint">No results for that query.</div>'; return; }
+    $('webGrid').innerHTML = '';
+    d.images.forEach(function (im) {
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'webpick'; b.title = im.alt || q;
+      b.innerHTML = '<img src="' + im.thumb + '" alt="">';
+      b.onclick = function () { pickWebImage(im.full).then(function () { toast('Reference added'); }).catch(function (e) { toast(e.message); }); };
+      $('webGrid').appendChild(b);
+    });
+  } catch (e) { $('webGrid').innerHTML = '<div class="hint">' + e.message + '</div>'; }
+  finally { btn.disabled = false; }
+}
 function syncChips() { $('diningChip').classList.toggle('on', $('dining').checked); $('garageChip').classList.toggle('on', $('garage').checked); }
 
 /* ---------------- boot ---------------- */
-function randomize() { $('plotW').value = 12 + Math.floor(Math.random() * 16); $('plotD').value = 10 + Math.floor(Math.random() * 12); $('floors').value = 1 + Math.floor(Math.random() * 3); $('bedrooms').value = 1 + Math.floor(Math.random() * 5); $('bathrooms').value = 1 + Math.floor(Math.random() * 3); $('kitchens').value = 1; $('living').value = 1; $('style').value = ['modern', 'traditional', 'minimalist', 'scandinavian', 'industrial'][Math.floor(Math.random() * 5)]; $('dining').checked = true; $('garage').checked = Math.random() > 0.4; syncChips(); generate(); }
+function randomize() { $('plotW').value = 12 + Math.floor(Math.random() * 16); $('plotD').value = 10 + Math.floor(Math.random() * 12); $('floors').value = 1 + Math.floor(Math.random() * 3); $('bedrooms').value = 1 + Math.floor(Math.random() * 5); $('bathrooms').value = 1 + Math.floor(Math.random() * 3); $('kitchens').value = 1; $('living').value = 1; $('style').value = ['modern', 'traditional', 'minimalist', 'scandinavian', 'industrial'][Math.floor(Math.random() * 5)]; $('dining').checked = true; $('garage').checked = Math.random() > 0.4; syncChips(); generate(false); }
 function boot() {
   try { if (window.House3D && window.House3D.Viewer) viewer = new window.House3D.Viewer($('view3d')); } catch (e) {}
-  $('generateBtn').onclick = generate; $('randomBtn').onclick = randomize;
+  $('generateBtn').onclick = function () { generate(false); }; $('randomBtn').onclick = randomize;
   ['plotW', 'plotD'].forEach(function (id) { $(id).addEventListener('input', updateArea); });
   $('dining').onchange = syncChips; $('garage').onchange = syncChips;
   ['three', 'plan', 'renders', 'scheme'].forEach(function (t) { $('tab-' + t).onclick = function () { tab(t); }; });
@@ -135,9 +160,10 @@ function boot() {
   $('schemeBtn').onclick = genScheme; $('diagBtn').onclick = function () { diagnoseAI(false); };
   document.querySelectorAll('[data-view]').forEach(function (b) { b.onclick = function () { if (!cfg) { toast('Generate a house first'); return; } renderView(b.dataset.view, b.textContent); }; });
   $('uploadBtn').onclick = function () { $('fileInput').click(); }; $('fileInput').onchange = function (e) { handleFiles(e.target.files); };
+  $('webSearchBtn').onclick = searchWeb; $('webQuery').addEventListener('keydown', function (e) { if (e.key === 'Enter') searchWeb(); });
   document.querySelectorAll('#mode3d button').forEach(function (b) { b.onclick = function () { if (viewer) viewer.setMode(b.dataset.m); document.querySelectorAll('#mode3d button').forEach(function (x) { x.classList.remove('active'); }); b.classList.add('active'); }; });
   $('cutBtn').onclick = function () { cut = !cut; $('cutBtn').textContent = 'Cutaway: ' + (cut ? 'on' : 'off'); if (viewer) viewer.setCutaway(cut); };
-  syncChips(); updateArea(); generate(); checkAI();
+  syncChips(); updateArea(); generate(true); checkAI();
 }
 boot();
 })();

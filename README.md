@@ -1,9 +1,6 @@
-# ForthHome — 3D House Designer
+# ForthHome — AI House Designer (MVP)
 
-Set your land, rooms and style, and get a **walkable 3D house** you can explore
-in first person — built on a **unit-tested floor-plan engine** so the layout is
-always geometrically correct. Two extra tabs add an **accurate 2D plan** and
-**photorealistic AI renders** of each room.
+Describe your plot and rooms, get a **walkable 3D house**, an **accurate 2D floor plan**, and optional **AI interior/exterior renders** guided by your reference images.
 
 ## Quick start
 
@@ -11,51 +8,55 @@ Needs **Node 18+**. No `npm install`.
 
 ```bash
 cd house-builder
+cp .env.example .env   # optional — fill keys for AI features
 node server.js
 ```
 
-Open **http://localhost:3000** (a sample house builds on load). The 3D needs
-WebGL — any modern browser. If 3D ever fails it shows the error on screen rather
-than going black.
+Open **http://localhost:3000**. A sample house builds on load.
 
-## The 3D model (main tab)
+## What you can do (MVP)
 
-- **Orbit / Walk** toggle. In **Walk**: click the scene, then **W A S D** + mouse
-  to look, **Shift** to run, **C** for no-clip, **Esc** to release.
-- **Level** buttons switch floors; **Cutaway** hides the roof/ceilings to peek in.
-- Furnished rooms (beds, sofas, kitchen counters, dining sets, baths, wardrobes,
-  cars), windows, doors, stairs, roof and yard — all placed from the floor plan.
+| Step | What | Needs API key? |
+|------|------|----------------|
+| 1 | Set **plot size**, **floors**, **bedrooms**, **bathrooms**, **kitchens**, dining/garage, **style** | No |
+| 2 | **Generate house** → walkable **3D model** (Orbit + first-person Walk) | No |
+| 3 | **Floor plan** tab → dimensions, furniture, SVG/PNG download | No |
+| 4 | **Design scheme** → AI palette + per-room notes | `OPENAI_API_KEY` |
+| 5 | **Photoreal renders** → exterior + room photos | `OPENAI_API_KEY` + org verified for image model |
+| 6 | **Reference images** → upload or **Search web** (Unsplash) to steer renders | Unsplash key for search only |
 
-## Floor plan tab
+### 3D controls
 
-A clean architectural drawing (walls, door swings, windows, plan-view furniture,
-dimensions, north arrow). Download as **SVG** or **PNG**.
+- **Orbit / Walk** — in Walk: click scene, **WASD** + mouse, **Shift** run, **C** no-clip, **Esc** release
+- **Level** buttons switch floors; **Cutaway** hides roof/ceilings
 
-## Photoreal renders tab (OpenAI)
+### AI tips (save usage)
 
-Click a view (Exterior, Living room, …) for a magazine-quality photo of that
-space. Uploaded **reference images** steer the look.
+- Start with **Design scheme** (cheap text model) before renders
+- Add 1–3 **reference images** so each render needs fewer retries
+- Use **Test OpenAI** if renders fail — usually org verification for `gpt-image-1`
 
-> **Why renders may fail:** `gpt-image-1` requires your OpenAI **organization to
-> be verified** (DALL·E 3 was retired in 2026, so there's no fallback). Use the
-> **Test OpenAI** button — it reports the exact issue. Also **rotate the key you
-> pasted in chat** (it's exposed): revoke at platform.openai.com/api-keys, put a
-> fresh one in `.env`. The Design-scheme text feature works without verification.
+## Environment variables
 
-## Files
+See `.env.example`. Minimum for full MVP:
 
-| File | Purpose |
-|---|---|
-| `public/layout.js` | Pure, unit-tested floor-plan engine. |
-| `public/house3d.js` | Pure `describeHouse()` (unit-tested) + the Three.js walk-through viewer. |
-| `public/app.js` | UI: 3D + 2D plan + AI client. |
-| `public/index.html` | UI shell (loads Three.js r128 from CDN). |
-| `server.js` | Zero-dependency server + OpenAI endpoints + `/diagnose`. |
+```env
+OPENAI_API_KEY=sk-...
+UNSPLASH_ACCESS_KEY=...   # optional, for web inspiration search
+```
+
+## Architecture
+
+| File | Role |
+|------|------|
+| `public/layout.js` | Floor-plan engine (rooms, corridor, doors, windows) |
+| `public/house3d.js` | 3D scene builder + Three.js walk-through viewer |
+| `public/app.js` | UI wiring, 2D plan SVG, AI client |
+| `public/vendor/` | Bundled Three.js (works offline) |
+| `server.js` | Static server + OpenAI + Unsplash proxy |
 
 ## Honest limits
 
-- The 3D is **clean real-time architectural visualization** (think tidy game/CAD
-  look), not a photograph. True photorealism comes from the AI renders tab.
-- Layout is a central-corridor scheme — correct and sensible, not a bespoke
-  architect's plan (no curved walls / wings yet).
-- Floors switch via the Level buttons (you don't climb the stairs).
+- 3D is **real-time architectural visualization** (furnished, walkable) — not a photograph. Photorealism comes from the AI renders tab.
+- Layout uses a proven **central-corridor** scheme — sensible and accurate, not a custom architect drawing.
+- Floor switching uses Level buttons (stairs are visual only).

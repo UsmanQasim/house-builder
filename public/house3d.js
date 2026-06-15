@@ -159,6 +159,7 @@ if (typeof THREE !== 'undefined') {
     var w = this.container.clientWidth, h = this.container.clientHeight || 400;
     this.scene = new THREE.Scene(); this.scene.background = new THREE.Color(0xaac4e4);
     this.camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 2000); this.camera.position.set(20, 18, 26);
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); this.renderer.setSize(w, h);
     this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     if (this.renderer.outputColorSpace !== undefined) this.renderer.outputColorSpace = THREE.SRGBColorSpace; else this.renderer.outputEncoding = THREE.sRGBEncoding;
