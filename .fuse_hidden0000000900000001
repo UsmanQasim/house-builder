@@ -1,0 +1,13 @@
+{
+  "name": "house-builder-mvp",
+  "version": "1.0.0",
+  "description": "Procedural 3D house designer with a first-person virtual walkthrough (MVP)",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {}
+}

@@ -158,7 +158,7 @@ function serveStatic(req, res) {
 }
 
 http.createServer(async (req, res) => {
-  const u = new URL(req.url, 'http://localhost');
+  let u; try { u = new URL(req.url, 'http://localhost'); } catch (_) { res.writeHead(400); return res.end('Bad request'); }
   if (req.method === 'GET' && u.pathname === '/api/ai/status') return json(res, 200, { openai: !!key(), textModel: TEXT_MODEL, imageModel: IMAGE_MODEL });
   if (req.method === 'GET' && u.pathname === '/api/ai/diagnose') return diagnose(res);
   if (req.method === 'POST' && u.pathname === '/api/ai/design-brief') return designBrief(res, await readBody(req));

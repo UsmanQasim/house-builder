@@ -1,7 +1,7 @@
 {
   "name": "house-builder-mvp",
   "version": "1.0.0",
-  "description": "Procedural 3D house designer with a first-person virtual walkthrough (MVP)",
+  "description": "AI house designer: accurate 2D floor plan + photorealistic OpenAI renders",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {

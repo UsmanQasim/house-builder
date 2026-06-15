@@ -1,110 +1,61 @@
-# ForthHome - AI House Builder (MVP)
+# ForthHome — 3D House Designer
 
-Design a home from a few inputs (land size, floors, rooms, kitchens, baths, style),
-get an **intelligent floor plan** and a **furnished, realistically-lit 3D model**,
-then **walk through it in first person**. An optional **AI Interior Designer**
-(OpenAI) generates a cohesive color scheme that recolors the whole house, plus
-photorealistic interior renders.
-
----
+Set your land, rooms and style, and get a **walkable 3D house** you can explore
+in first person — built on a **unit-tested floor-plan engine** so the layout is
+always geometrically correct. Two extra tabs add an **accurate 2D plan** and
+**photorealistic AI renders** of each room.
 
 ## Quick start
 
-Needs **Node.js 18+** (`node -v`). No `npm install` required.
+Needs **Node 18+**. No `npm install`.
 
 ```bash
 cd house-builder
 node server.js
 ```
 
-Open **http://localhost:3000**. A sample house generates on load.
+Open **http://localhost:3000** (a sample house builds on load). The 3D needs
+WebGL — any modern browser. If 3D ever fails it shows the error on screen rather
+than going black.
 
----
+## The 3D model (main tab)
 
-## SECURITY — rotate your OpenAI key
+- **Orbit / Walk** toggle. In **Walk**: click the scene, then **W A S D** + mouse
+  to look, **Shift** to run, **C** for no-clip, **Esc** to release.
+- **Level** buttons switch floors; **Cutaway** hides the roof/ceilings to peek in.
+- Furnished rooms (beds, sofas, kitchen counters, dining sets, baths, wardrobes,
+  cars), windows, doors, stairs, roof and yard — all placed from the floor plan.
 
-The key you pasted in chat is in `.env` so the app works, **but it is now
-exposed**. Please:
+## Floor plan tab
 
-1. Go to <https://platform.openai.com/api-keys> and **revoke** that key.
-2. Create a new one and paste it into `.env` as `OPENAI_API_KEY=...`.
+A clean architectural drawing (walls, door swings, windows, plan-view furniture,
+dimensions, north arrow). Download as **SVG** or **PNG**.
 
-`.env` is already in `.gitignore`, so it will not be committed.
+## Photoreal renders tab (OpenAI)
 
----
+Click a view (Exterior, Living room, …) for a magazine-quality photo of that
+space. Uploaded **reference images** steer the look.
 
-## What's new vs the first version
-
-- **Intelligent layout** — a real central hallway connects the front door, the
-  stairs and every room. Rooms are double-loaded off the corridor with deliberate
-  doors; windows only appear on exterior walls. Public rooms (living/kitchen/
-  dining/garage) go on the ground floor, bedrooms and baths upstairs.
-- **Designed interiors** — every room is furnished and styled: per-room flooring
-  (wood / tile / carpet / concrete), painted walls, rugs, artwork, ceiling lights,
-  plants, baseboards and door frames. Detailed furniture for living, bedroom,
-  kitchen, bathroom, dining and garage.
-- **Realistic rendering** — image-based lighting (Three.js RoomEnvironment),
-  ACES filmic tone-mapping, sRGB color, soft shadows, reflective glass, and
-  procedurally-generated material textures.
-- **5 styles** — modern, traditional, scandinavian, minimalist, industrial,
-  each with its own palette, materials and roof type.
-- **AI Interior Designer** (OpenAI) — see below.
-
----
-
-## Using it
-
-1. Set land, rooms, floors and style on the left, press **Generate house**.
-2. **Orbit** to inspect; **Cutaway** hides the roof for a dollhouse view (with a
-   floor selected it shows that level and below).
-3. **Walk** — click the scene, then `W A S D` + mouse, `Shift` to run, `C` for
-   no-clip if you ever get stuck, `Esc` to release. Use the `L1/L2…` buttons to
-   change levels.
-4. **Export** the floor plan (PNG) or the 3D model (GLB).
-
-### AI Interior Designer (optional, uses OpenAI credits)
-
-- **Generate design scheme** — calls `gpt-4o-mini` to produce a cohesive palette
-  + per-room colors + notes. With *Apply palette* on, the whole 3D house is
-  instantly recolored to that scheme.
-- **Inspiration render** — calls the image model (`gpt-image-1`) to produce a
-  photorealistic render of the selected room in your style. Renders cost a few
-  cents each; the model is set by `OPENAI_IMAGE_MODEL` in `.env`.
-
----
-
-## Environment variables (`.env`)
-
-| Key | Purpose |
-|---|---|
-| `OPENAI_API_KEY` | Required for the AI designer. |
-| `OPENAI_TEXT_MODEL` | Default `gpt-4o-mini` (design scheme). |
-| `OPENAI_IMAGE_MODEL` | Default `gpt-image-1` (interior renders). |
-| `UNSPLASH_ACCESS_KEY` | Optional — enables "Search web" reference images. |
-| `PORT` | Default 3000. |
-
-Only the core 3D app needs **no keys at all**.
-
----
+> **Why renders may fail:** `gpt-image-1` requires your OpenAI **organization to
+> be verified** (DALL·E 3 was retired in 2026, so there's no fallback). Use the
+> **Test OpenAI** button — it reports the exact issue. Also **rotate the key you
+> pasted in chat** (it's exposed): revoke at platform.openai.com/api-keys, put a
+> fresh one in `.env`. The Design-scheme text feature works without verification.
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `server.js` | Zero-dependency Node server + OpenAI endpoints (keys stay server-side). |
-| `public/index.html` | UI shell + styles. |
-| `public/app.js` | Layout engine, 3D builder, interiors, walkthrough, AI client. |
-| `.env` / `.env.example` | Your keys (gitignored) / template. |
+| `public/layout.js` | Pure, unit-tested floor-plan engine. |
+| `public/house3d.js` | Pure `describeHouse()` (unit-tested) + the Three.js walk-through viewer. |
+| `public/app.js` | UI: 3D + 2D plan + AI client. |
+| `public/index.html` | UI shell (loads Three.js r128 from CDN). |
+| `server.js` | Zero-dependency server + OpenAI endpoints + `/diagnose`. |
 
----
+## Honest limits
 
-## Known limits & next steps
-
-- Layout is a central-corridor scheme (no curved walls or L-shaped wings yet).
-- Floors change via the level buttons rather than physically climbing stairs.
-- Furniture is clean primitives (recognizable, not photoreal) — the AI renders
-  fill the photoreal gap.
-
-Good next steps: let an uploaded reference image drive the palette automatically,
-add door/window placement controls, a cost estimate from area + fixtures, and
-save/load of designs.
+- The 3D is **clean real-time architectural visualization** (think tidy game/CAD
+  look), not a photograph. True photorealism comes from the AI renders tab.
+- Layout is a central-corridor scheme — correct and sensible, not a bespoke
+  architect's plan (no curved walls / wings yet).
+- Floors switch via the Level buttons (you don't climb the stairs).
