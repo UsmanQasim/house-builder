@@ -101,16 +101,16 @@
     <div class="sec promptsec">
       <h2>✨ Describe your dream home</h2>
       <textarea id="promptText" rows="3" placeholder="e.g. A 4-bedroom modern villa with an open-plan kitchen + dining, a home office, a double garage and a large master suite with ensuite"></textarea>
-      <button class="primary" id="promptBtn" style="margin-top:9px">Design from prompt ✨</button>
-      <div class="hint">AI reads your words, fills the settings below, and designs the floor plan + walkable 3D house (GPT-4o + free web research). Ctrl/Cmd+Enter to run.</div>
+      <div class="chips" style="margin-top:9px"><label class="chip on" id="aiChip"><input id="aiPromptToggle" type="checkbox" checked> ✨ Use my description when I Generate</label></div>
+      <div class="hint">Optional. Describe what you want (e.g. “ensuite bathroom in the master, big kitchen”), then press <b>Generate house</b> below. Toggle off to ignore it. Ctrl/Cmd+Enter also runs.</div>
     </div>
     <div class="sec">
       <h2>Land &amp; structure</h2>
       <div class="row">
-        <div class="field"><label>Plot width (m)</label><input id="plotW" type="number" min="6" max="80" value="18"></div>
-        <div class="field"><label>Plot depth (m)</label><input id="plotD" type="number" min="6" max="80" value="14"></div>
+        <div class="field"><label>House width (m)</label><input id="plotW" type="number" min="6" max="80" value="11"></div>
+        <div class="field"><label>House length (m)</label><input id="plotD" type="number" min="6" max="80" value="13"></div>
       </div>
-      <div class="stat">Plot area <b id="areaStat">252 m²</b> · <span id="areaFt">2,712 ft²</span></div>
+      <div class="stat">House size <b id="areaStat">143 m²</b> · <span id="areaFt">1,539 ft²</span> · the plan &amp; 3D follow these</div>
       <div class="row" style="margin-top:10px">
         <div class="field"><label>Floors</label><input id="floors" type="number" min="1" max="4" value="2"></div>
         <div class="field"><label>Living rooms</label><input id="living" type="number" min="0" max="4" value="1"></div>

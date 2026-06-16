@@ -364,6 +364,8 @@ async function aiFloorPlan(res, spec) {
 
   let layout = aiCustom || HouseLayout.buildFromTemplate(spec, templateId);
   if (!layout) layout = HouseLayout.computeLayout(spec);
+  let source = aiCustom ? 'ai-custom' : (layout.planSource === 'template' ? 'pro-template' : 'built-in');
+  if (spec.prompt && /ensuite|en-?suite|master bath|attached bath|bath\w*[\s\S]{0,28}(bed|master)|bed\w*[\s\S]{0,28}bath/i.test(spec.prompt)) { ensuiteify(layout); source = 'ai-custom'; }
 
   json(res, 200, {
     layout: layout,
@@ -374,7 +376,7 @@ async function aiFloorPlan(res, spec) {
     researchQuery: research.query,
     researchHits: research.hits.length,
     researchEngine: research.engine,
-    source: aiCustom ? 'ai-custom' : (layout.planSource === 'template' ? 'pro-template' : 'built-in'),
+    source: source,
     planModel: PLAN_MODEL
   });
 }

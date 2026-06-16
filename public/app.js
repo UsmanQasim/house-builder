@@ -27,18 +27,27 @@ function applyLayout(layout, meta) {
 }
 async function generate(silent) {
   cfg = readForm();
+  var _p = (($('promptText') && $('promptText').value) || '').trim();
+  var _useP = !!_p && (!$('aiPromptToggle') || $('aiPromptToggle').checked);
+  if (_useP) cfg.prompt = _p;
   var btn = $('generateBtn'); btn.disabled = true;
-  if (!silent) toast('Designing floor plan…');
+  if (!silent) toast(_useP ? 'Designing from your description…' : 'Designing floor plan…');
   try {
     var usedAI = false;
-    if (aiPlansOn) {
+    if (aiPlansOn || _useP) {
       try {
         var r = await fetch('/api/ai/floor-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
         var d = await r.json();
         if (r.ok && d.layout) {
+          if (_useP && d.spec) applySpecToForm(d.spec);
           applyLayout(d.layout, { concept: d.concept, inspiration: d.inspiration, source: d.source, hits: d.researchHits, templateId: d.templateId });
           usedAI = true;
-          if (!silent) toast((d.source === 'pro-template' ? 'Pro floor plan (' + (d.templateId || 'template') + ')' : 'Floor plan ready') + (d.researchHits ? ' · ' + d.researchHits + ' web refs' : ''));
+          if (!silent) {
+            var msg = d.source === 'ai-custom' ? '✨ Custom plan from your description'
+              : (_useP ? 'Matched your words to a pro plan (' + (d.templateId || 'template') + ')'
+                       : 'Pro plan (' + (d.templateId || 'template') + ')');
+            toast(msg + (d.researchHits ? ' · ' + d.researchHits + ' web refs' : ''));
+          }
         }
       } catch (e) { /* fall through */ }
     }
@@ -278,8 +287,8 @@ function randomize() { $('plotW').value = 12 + Math.floor(Math.random() * 16); $
 function boot() {
   try { if (window.House3D && window.House3D.Viewer) viewer = new window.House3D.Viewer($('view3d')); } catch (e) {}
   $('generateBtn').onclick = function () { generate(false); }; $('randomBtn').onclick = randomize;
-  $('promptBtn').onclick = generateFromPrompt;
-  $('promptText').addEventListener('keydown', function (e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') generateFromPrompt(); });
+  if ($('promptText')) $('promptText').addEventListener('keydown', function (e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') generate(false); });
+  if ($('aiPromptToggle')) $('aiPromptToggle').onchange = function () { var c = $('aiChip'); if (c) c.classList.toggle('on', this.checked); };
   ['plotW', 'plotD'].forEach(function (id) { $(id).addEventListener('input', updateArea); });
   $('dining').onchange = syncChips; $('garage').onchange = syncChips;
   $('aiPlans').onchange = function () { aiPlansOn = $('aiPlans').checked; $('aiPlanChip').classList.toggle('on', aiPlansOn); };
