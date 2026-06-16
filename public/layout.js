@@ -18,6 +18,21 @@
   };
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  // Realistic building size: rooms get human sizes (bath ~5, bed ~13 m²),
+  // leftover plot becomes garden instead of bloating every room.
+  function buildingArea(c) {
+    var beds = Math.max(0, c.bedrooms || 0), baths = Math.max(0, c.bathrooms || 0), kit = Math.max(0, c.kitchens || 0), liv = Math.max(0, c.living || 0);
+    var total = liv * 24 + beds * 13 + (beds > 0 ? 4 : 0) + baths * 5 + kit * 11 + (c.dining ? 13 : 0) + (c.garage ? 20 : 0);
+    total = Math.max(total, 42) * 1.18; // + circulation & walls
+    return total / Math.max(1, Math.min(4, c.floors || 1));
+  }
+  function sizedFootprint(c) {
+    // Width/Length you enter ARE the house footprint (minus a thin wall margin),
+    // so changing them changes the plan + 3D model directly.
+    var margin = clamp(Math.min(c.plotW, c.plotD) * 0.05, 0.4, 1.0);
+    var fw = Math.max(6, c.plotW - 2 * margin), fh = Math.max(6, c.plotD - 2 * margin);
+    return { fw: fw, fh: fh, fx: (c.plotW - fw) / 2, fy: (c.plotD - fh) / 2 };
+  }
   function mk(type, name, x, y, w, h) {
     w = Math.max(0.5, w); h = Math.max(0.5, h);
     return { type: type, name: name, x: x, y: y, w: w, h: h, area: w * h, door: null, windows: [] };
@@ -295,9 +310,7 @@
   function buildFromTemplate(c, templateId) {
     var PT = getPT(); if (!PT) return null;
     var tpl = PT.CATALOG[templateId] || PT.CATALOG[PT.pickTemplate(c)]; if (!tpl) return null;
-    var margin = clamp(Math.min(c.plotW, c.plotD) * 0.08, 0.8, 2.0);
-    var fw = Math.max(8, c.plotW - 2 * margin), fh = Math.max(7, c.plotD - 2 * margin);
-    var fx = (c.plotW - fw) / 2, fy = (c.plotD - fh) / 2;
+    var __ft = sizedFootprint(c), fw = __ft.fw, fh = __ft.fh, fx = __ft.fx, fy = __ft.fy;
     if (tpl.floors.length !== c.floors) return null;
 
     var floors = [], fi, corridorX = fx + fw / 2 - 0.6, CW = 1.25;
@@ -365,10 +378,7 @@
       var built = buildFromTemplate(c, tid);
       if (built) return built;
     }
-    var margin = clamp(Math.min(c.plotW, c.plotD) * 0.08, 0.8, 2.0);
-    var fw = Math.max(8, c.plotW - 2 * margin);
-    var fh = Math.max(7, c.plotD - 2 * margin);
-    var fx = (c.plotW - fw) / 2, fy = (c.plotD - fh) / 2;
+    var __ft = sizedFootprint(c), fw = __ft.fw, fh = __ft.fh, fx = __ft.fx, fy = __ft.fy;
 
     var floors = [layoutGround(c, fx, fy, fw, fh)];
     var corridorX = fx + (fw - 1.25) / 2, CW = 1.25;
@@ -386,9 +396,7 @@
 
   function fromAI(raw, c) {
     if (!raw || !Array.isArray(raw.floors) || !raw.floors.length) return null;
-    var margin = clamp(Math.min(c.plotW, c.plotD) * 0.08, 0.8, 2.0);
-    var fw = Math.max(8, c.plotW - 2 * margin), fh = Math.max(7, c.plotD - 2 * margin);
-    var fx = (c.plotW - fw) / 2, fy = (c.plotD - fh) / 2;
+    var __ft = sizedFootprint(c), fw = __ft.fw, fh = __ft.fh, fx = __ft.fx, fy = __ft.fy;
     var floors = [], fi, corridorX = fx + (fw - 1.25) / 2, CW = 1.25;
 
     for (fi = 0; fi < raw.floors.length && fi < c.floors; fi++) {

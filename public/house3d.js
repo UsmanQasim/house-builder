@@ -19,7 +19,7 @@ function describeHouse(L, cfg) {
   var P = STYLES[cfg.style] || STYLES.modern;
   var items = [], collision = [], pw = cfg.plotW, pd = cfg.plotD;
   var WX = function (x) { return x - pw / 2; }, WZ = function (y) { return y - pd / 2; };
-  function box(t, x, y, z, w, h, d, color, tex, fl, ry) { items.push({ t: t, x: x, y: y, z: z, w: w, h: h, d: d, color: color, tex: tex || null, floor: (fl == null ? -1 : fl), ry: ry || 0 }); }
+  function box(t, x, y, z, w, h, d, color, tex, fl, ry, geo, slot) { items.push({ t: t, x: x, y: y, z: z, w: w, h: h, d: d, color: color, tex: tex || null, floor: (fl == null ? -1 : fl), ry: ry || 0, geo: geo || 'box', slot: slot || null }); }
   function col(fl, a, b, c, d) { collision.push({ floor: fl, minX: Math.min(a, b), maxX: Math.max(a, b), minZ: Math.min(c, d), maxZ: Math.max(c, d) }); }
 
   // ground, foundation slab, plinth band, path
@@ -173,63 +173,69 @@ function describeHouse(L, cfg) {
     if (rm.type === 'bathroom') { B(0.6, 0.06, 0.12, '#e8e8e8', w / 2 - 0.4, 0, 1.3); } }
 
   function furnish(rm, yB, fi) {
-    var cx = WX(rm.x + rm.w / 2), cz = WZ(rm.y + rm.h / 2), w = rm.w, d = rm.h, cl = 0.18;
-    // place against walls: ox/oz are offsets from room centre
-    function P3(bw, bh, bd, color, ox, oz, oy, tex, ry) { box('furn', cx + ox, yB + (oy == null ? bh / 2 : oy), cz + oz, bw, bh, bd, color, tex || null, fi, ry || 0); }
+    var cx = WX(rm.x + rm.w / 2), cz = WZ(rm.y + rm.h / 2), w = rm.w, d = rm.h, cl = 0.18, rid = fi + '_' + Math.round(Math.abs(rm.x * 7 + rm.y * 13));
+    function P3(bw, bh, bd, color, ox, oz, oy, tex, ry, slot) { box('furn', cx + ox, yB + (oy == null ? bh / 2 : oy), cz + oz, bw, bh, bd, color, tex || null, fi, ry || 0, 'box', slot || null); }
+    function CY(dia, bh, color, ox, oz, oy, geo, slot) { box('furn', cx + ox, yB + (oy == null ? bh / 2 : oy), cz + oz, dia, bh, dia, color, null, fi, 0, geo || 'cyl', slot || null); }
+    function MS(id, model, ox, oz, mw, mh, md, ry) { items.push({ t: 'modelslot', slot: id, model: model, x: cx + ox, y: yB + mh / 2, z: cz + oz, w: mw, h: mh, d: md, color: '#ffffff', tex: null, floor: fi, ry: ry || 0, geo: 'box' }); }
     function rug(rw, rd, color) { box('furn', cx, yB + 0.012, cz, rw, 0.02, rd, color, null, fi); }
-    var backZ = function (id) { return -d / 2 + id / 2 + cl; };     // against back (-z) wall
-    var frontZ = function (id) { return d / 2 - id / 2 - cl; };     // against front (+z) wall
-    var leftX = function (iw) { return -w / 2 + iw / 2 + cl; };     // against left (-x) wall
-    var rightX = function (iw) { return w / 2 - iw / 2 - cl; };     // against right (+x) wall
+    var backZ = function (id) { return -d / 2 + id / 2 + cl; };
+    var frontZ = function (id) { return d / 2 - id / 2 - cl; };
+    var leftX = function (iw) { return -w / 2 + iw / 2 + cl; };
+    var rightX = function (iw) { return w / 2 - iw / 2 - cl; };
     if (w < 1.3 || d < 1.3) { if (rm.type !== 'bathroom') return; }
     switch (rm.type) {
       case 'bedroom': {
-        var bw = Math.min(1.7, w * 0.62), bl = Math.min(2.1, d * 0.6);
+        var bw = Math.min(1.7, w * 0.62), bl = Math.min(2.1, d * 0.6), bz = backZ(bl), bs = 'bed' + rid;
         rug(Math.min(w - 0.5, bw + 1.2), Math.min(d - 0.5, bl + 0.8), FURN.rug);
-        P3(bw, 0.4, bl, FURN.wood, 0, backZ(bl), 0.2, 'wood');                 // bed base (head to back wall)
-        P3(bw - 0.1, 0.16, bl * 0.7, FURN.wht, 0, backZ(bl) + 0.12, 0.5);      // duvet
-        P3(bw * 0.4, 0.14, 0.34, FURN.fabL, -bw * 0.24, -d / 2 + 0.4, 0.62); P3(bw * 0.4, 0.14, 0.34, FURN.fabL, bw * 0.24, -d / 2 + 0.4, 0.62);
-        P3(bw + 0.2, 1.0, 0.1, FURN.woodL, 0, -d / 2 + cl + 0.05, 0.55);       // headboard
+        P3(bw, 0.4, bl, FURN.wood, 0, bz, 0.2, 'wood', 0, bs);
+        P3(bw - 0.1, 0.16, bl * 0.7, FURN.wht, 0, bz + 0.12, 0.5, null, 0, bs);
+        P3(bw * 0.4, 0.14, 0.34, FURN.fabL, -bw * 0.24, -d / 2 + 0.4, 0.62, null, 0, bs); P3(bw * 0.4, 0.14, 0.34, FURN.fabL, bw * 0.24, -d / 2 + 0.4, 0.62, null, 0, bs);
+        P3(bw + 0.2, 1.0, 0.1, FURN.woodL, 0, -d / 2 + cl + 0.05, 0.55, null, 0, bs);
+        MS(bs, 'Bed', 0, bz, bw, 0.95, bl, 0);
         P3(0.45, 0.45, 0.4, FURN.woodL, -bw / 2 - 0.35, -d / 2 + 0.4, 0.24); P3(0.45, 0.45, 0.4, FURN.woodL, bw / 2 + 0.35, -d / 2 + 0.4, 0.24);
-        P3(Math.min(2.0, d * 0.55), 2.1, 0.58, FURN.drk, rightX(0.58), frontZ(Math.min(2.0, d * 0.55)) - 0.1, 1.05, 'wood', Math.PI / 2); // wardrobe on side wall
+        var wdt = Math.min(2.0, d * 0.55), wz = frontZ(wdt) - 0.1, ws = 'wr' + rid;
+        P3(wdt, 2.1, 0.58, FURN.drk, rightX(0.58), wz, 1.05, 'wood', Math.PI / 2, ws); MS(ws, 'Wardrobe', rightX(0.58), wz, 0.58, 2.1, wdt, Math.PI / 2);
         break; }
       case 'living': {
-        var sw = Math.min(2.8, w * 0.62);
+        var sw = Math.min(2.8, w * 0.62), sz = backZ(0.92), ss = 'sofa' + rid;
         rug(Math.min(w - 0.6, 3.2), Math.min(d - 0.6, 2.2), FURN.rug);
-        P3(sw, 0.4, 0.92, FURN.fab, 0, backZ(0.92), 0.2);                      // sofa seat against back wall
-        P3(sw, 0.55, 0.2, FURN.fab, 0, -d / 2 + cl + 0.1, 0.48);               // sofa back
-        P3(0.24, 0.55, 0.92, FURN.fabL, -sw / 2 - 0.12, backZ(0.92), 0.3); P3(0.24, 0.55, 0.92, FURN.fabL, sw / 2 + 0.12, backZ(0.92), 0.3);
-        P3(Math.min(1.3, sw * 0.6), 0.34, 0.6, FURN.woodL, 0, backZ(0.92) + 1.0, 0.17, 'wood'); // coffee table
-        P3(Math.min(2.0, w * 0.6), 0.45, 0.42, FURN.wood, 0, frontZ(0.42), 0.22, 'wood');       // TV console front wall
-        P3(Math.min(1.8, w * 0.55), 0.95, 0.06, FURN.black, 0, frontZ(0.06) - 0.02, 1.1);       // TV screen
-        P3(0.7, 1.1, 0.7, FURN.green, leftX(0.7), frontZ(0.7), 0); P3(0.34, 0.5, 0.34, '#7a5a3a', leftX(0.34), frontZ(0.34), 0.25, null); // plant
+        P3(sw, 0.4, 0.92, FURN.fab, 0, sz, 0.2, null, 0, ss); P3(sw, 0.55, 0.2, FURN.fab, 0, -d / 2 + cl + 0.1, 0.48, null, 0, ss);
+        P3(0.24, 0.55, 0.92, FURN.fabL, -sw / 2 - 0.12, sz, 0.3, null, 0, ss); P3(0.24, 0.55, 0.92, FURN.fabL, sw / 2 + 0.12, sz, 0.3, null, 0, ss);
+        MS(ss, 'Sofa', 0, sz, sw + 0.5, 0.85, 0.95, 0);
+        var ct = Math.min(1.3, sw * 0.6), cs = 'cof' + rid;
+        P3(ct, 0.34, 0.6, FURN.woodL, 0, sz + 1.0, 0.17, 'wood', 0, cs); MS(cs, 'Coffee Table', 0, sz + 1.0, ct, 0.4, 0.6, 0);
+        P3(Math.min(2.0, w * 0.6), 0.45, 0.42, FURN.wood, 0, frontZ(0.42), 0.22, 'wood');
+        P3(Math.min(1.8, w * 0.55), 0.95, 0.06, FURN.black, 0, frontZ(0.06) - 0.02, 1.1);
+        var ps = 'plt' + rid; CY(0.36, 0.42, '#9c6b3f', leftX(0.55), frontZ(0.55), 0.21, 'cyl', ps); box('furn', cx + leftX(0.55), yB + 0.85, cz + frontZ(0.55), 0.85, 0.95, 0.85, FURN.green, null, fi, 0, 'sphere', ps); MS(ps, 'Potted Plant', leftX(0.55), frontZ(0.55), 0.85, 1.35, 0.85, 0);
         break; }
       case 'kitchen': {
         var run = Math.min(w - 0.4, 3.6);
-        P3(run, 0.9, 0.6, FURN.wht, 0, backZ(0.6), 0.45);                      // base run back wall
-        P3(run, 0.05, 0.64, FURN.steel, 0, backZ(0.64), 0.92);                 // worktop
-        P3(run, 0.7, 0.34, FURN.wood, 0, backZ(0.34), 2.05, 'wood');           // upper cabinets
-        P3(0.6, 0.06, 0.5, FURN.black, -run * 0.22, backZ(0.5), 0.95);         // hob
-        P3(Math.min(d - 0.6, 2.6), 0.9, 0.6, FURN.wht, leftX(0.6), 0.4, 0.45, null, Math.PI / 2); // side counter (L)
-        P3(0.78, 1.85, 0.72, FURN.met, rightX(0.72), backZ(0.72) + 0.1, 0.95);  // fridge
-        P3(Math.min(1.7, w * 0.5), 0.9, Math.min(1.0, d * 0.4), FURN.woodL, 0, 0.2, 0.45, 'wood'); // island
-        P3(Math.min(1.7, w * 0.5), 0.05, Math.min(1.0, d * 0.4), '#d9d2c4', 0, 0.2, 0.92, 'marble'); // island top
+        P3(run, 0.9, 0.6, FURN.wht, 0, backZ(0.6), 0.45); P3(run, 0.05, 0.64, FURN.steel, 0, backZ(0.64), 0.92);
+        P3(run, 0.7, 0.34, FURN.wood, 0, backZ(0.34), 2.05, 'wood'); P3(0.6, 0.06, 0.5, FURN.black, -run * 0.22, backZ(0.5), 0.95);
+        P3(Math.min(d - 0.6, 2.6), 0.9, 0.6, FURN.wht, leftX(0.6), 0.4, 0.45, null, Math.PI / 2);
+        var fs = 'frg' + rid; P3(0.78, 1.85, 0.72, FURN.met, rightX(0.72), backZ(0.72) + 0.1, 0.95, null, 0, fs); MS(fs, 'Refrigerator', rightX(0.72), backZ(0.72) + 0.1, 0.78, 1.85, 0.72, 0);
+        P3(Math.min(1.7, w * 0.5), 0.9, Math.min(1.0, d * 0.4), FURN.woodL, 0, 0.2, 0.45, 'wood'); P3(Math.min(1.7, w * 0.5), 0.05, Math.min(1.0, d * 0.4), '#d9d2c4', 0, 0.2, 0.92, 'marble');
         break; }
       case 'bathroom': {
-        P3(Math.min(1.6, w * 0.7), 0.55, 0.74, FURN.wht, 0, backZ(0.74), 0.28);   // tub back wall
-        P3(0.55, 0.45, 0.42, FURN.wht, rightX(0.42), 0, 0.22, null, Math.PI / 2); // toilet right wall
-        P3(0.8, 0.82, 0.5, FURN.woodL, leftX(0.5), frontZ(0.8) - 0.2, 0.41, 'wood', Math.PI / 2); // vanity left
-        P3(0.06, 0.7, 0.6, FURN.glassc, leftX(0.06), frontZ(0.6) - 0.2, 1.45);   // mirror
+        var bts = 'tub' + rid, tos = 'toi' + rid;
+        P3(Math.min(1.6, w * 0.7), 0.55, 0.74, FURN.wht, 0, backZ(0.74), 0.28, null, 0, bts); MS(bts, 'Bathtub', 0, backZ(0.74), Math.min(1.6, w * 0.7), 0.6, 0.74, 0);
+        P3(0.55, 0.45, 0.42, FURN.wht, rightX(0.42), 0, 0.22, null, Math.PI / 2, tos); MS(tos, 'Toilet', rightX(0.42), 0, 0.42, 0.7, 0.55, Math.PI / 2);
+        P3(0.8, 0.82, 0.5, FURN.woodL, leftX(0.5), frontZ(0.8) - 0.2, 0.41, 'wood', Math.PI / 2);
+        P3(0.06, 0.7, 0.6, FURN.glassc, leftX(0.06), frontZ(0.6) - 0.2, 1.45);
         break; }
       case 'dining': {
-        var tw = Math.min(2.2, w * 0.5), tl = Math.min(1.2, d * 0.45);
+        var tw = Math.min(2.2, w * 0.5), tl = Math.min(1.2, d * 0.45), dts = 'dtb' + rid;
         rug(Math.min(w - 0.5, tw + 1.4), Math.min(d - 0.5, tl + 1.4), FURN.rug);
-        P3(tw, 0.06, tl, FURN.woodL, 0, 0, 0.75, 'wood');
-        for (var ai = -1; ai <= 1; ai += 2) for (var bj = -1; bj <= 1; bj += 2) P3(0.42, 0.86, 0.42, FURN.wood, ai * tw * 0.34, bj * (tl / 2 + 0.28), 0.43, 'wood');
-        P3(Math.min(1.8, w * 0.55), 0.85, 0.45, FURN.wood, 0, backZ(0.45), 0.42, 'wood'); // sideboard
+        P3(tw, 0.06, tl, FURN.woodL, 0, 0, 0.75, 'wood', 0, dts);
+        CY(0.08, 0.74, FURN.wood, -tw * 0.42, -tl * 0.4, 0.37); CY(0.08, 0.74, FURN.wood, tw * 0.42, -tl * 0.4, 0.37); CY(0.08, 0.74, FURN.wood, -tw * 0.42, tl * 0.4, 0.37); CY(0.08, 0.74, FURN.wood, tw * 0.42, tl * 0.4, 0.37);
+        MS(dts, 'Dining Table', 0, 0, tw, 0.78, tl, 0);
+        var ci = 0; for (var ai = -1; ai <= 1; ai += 2) for (var bj = -1; bj <= 1; bj += 2) { var chs = 'ch' + rid + (ci++); P3(0.42, 0.86, 0.42, FURN.wood, ai * tw * 0.34, bj * (tl / 2 + 0.28), 0.43, 'wood', 0, chs); MS(chs, 'Chair', ai * tw * 0.34, bj * (tl / 2 + 0.28), 0.48, 0.9, 0.48, bj < 0 ? 0 : Math.PI); }
+        P3(Math.min(1.8, w * 0.55), 0.85, 0.45, FURN.wood, 0, backZ(0.45), 0.42, 'wood');
         break; }
       case 'garage': {
-        P3(Math.min(1.9, w * 0.5), 0.55, Math.min(4.2, d * 0.72), '#3a4654', 0, 0, 0.5); P3(Math.min(1.65, w * 0.45), 0.5, Math.min(2.0, d * 0.34), '#222a33', 0, -d * 0.04, 1.0);
+        var crs = 'car' + rid;
+        P3(Math.min(1.9, w * 0.5), 0.55, Math.min(4.2, d * 0.72), '#3a4654', 0, 0, 0.5, null, 0, crs); P3(Math.min(1.65, w * 0.45), 0.5, Math.min(2.0, d * 0.34), '#222a33', 0, -d * 0.04, 1.0, null, 0, crs);
+        MS(crs, 'Car', 0, 0, Math.min(1.9, w * 0.5), 1.4, Math.min(4.2, d * 0.72), 0);
         P3(Math.min(2.4, w * 0.7), 0.9, 0.4, FURN.drk, 0, backZ(0.4), 0.6, 'wood'); break; }
     }
   }
@@ -266,7 +272,7 @@ if (typeof THREE !== 'undefined') {
 
   function Viewer(container) {
     this.container = container; this.mode = 'orbit'; this.floor = 0; this.cut = false; this.noclip = false; this.keys = {};
-    this.texCache = {}; this.matCache = {}; this.matsByKind = {}; this.realTex = {}; this.realNor = {}; this.realRough = {}; this.coll = []; this.floorGroups = {}; this.ceil = []; this.roof = null;
+    this.texCache = {}; this.matCache = {}; this.matsByKind = {}; this.realTex = {}; this.realNor = {}; this.realRough = {}; this.coll = []; this.floorGroups = {}; this.ceil = []; this.roof = null; this.modelCache = {}; this._mq = {}; this.slotMeshes = {}; this.modelSlots = [];
     try { this._init(); } catch (e) { this._err('3D init failed: ' + e.message); }
   }
   Viewer.prototype._err = function (m) { var d = this.container.querySelector('.gl-err') || document.createElement('div'); d.className = 'gl-err'; d.textContent = m; d.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:#ffb4b4;background:#161019;padding:20px;font:13px Inter,sans-serif;z-index:9'; this.container.appendChild(d); };
@@ -316,22 +322,66 @@ if (typeof THREE !== 'undefined') {
     var c1 = new THREE.Mesh(new THREE.ConeGeometry(it.w / 2, it.h, 9), new THREE.MeshStandardMaterial({ color: new THREE.Color(it.color), roughness: 1 })); c1.position.y = 0; c1.castShadow = true;
     var c2 = new THREE.Mesh(new THREE.ConeGeometry(it.w / 2.6, it.h * 0.7, 9), new THREE.MeshStandardMaterial({ color: 0x4a8048, roughness: 1 })); c2.position.y = it.h * 0.5; c2.castShadow = true;
     g.add(c1); g.add(c2); g.position.set(it.x, it.y, it.z); return g; };
+  Viewer.prototype._fg = function (f) { return this.floorGroups[f] || (this.floorGroups[f] = (function () { var g = new THREE.Group(); this.root.add(g); return g; }).call(this)); };
+  Viewer.prototype._geo = function (it) { var g = it.geo; if (g === 'cyl') return new THREE.CylinderGeometry(it.w / 2, it.w / 2, it.h, 18); if (g === 'cone') return new THREE.ConeGeometry(it.w / 2, it.h, 16); if (g === 'sphere') return new THREE.SphereGeometry(Math.max(it.w, it.d) / 2, 18, 14); return new THREE.BoxGeometry(it.w, it.h, it.d); };
+  Viewer.prototype._ensureGLTF = function (cb) {
+    if (THREE.GLTFLoader) return cb(true);
+    if (THREE.GLTFLoader === false) return cb(false);
+    if (this._gltfCbs) { this._gltfCbs.push(cb); return; }
+    this._gltfCbs = [cb]; var self = this;
+    var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js';
+    sc.onload = function () { var ok = !!THREE.GLTFLoader; self._gltfCbs.forEach(function (c) { c(ok); }); self._gltfCbs = null; };
+    sc.onerror = function () { THREE.GLTFLoader = false; self._gltfCbs.forEach(function (c) { c(false); }); self._gltfCbs = null; };
+    document.head.appendChild(sc);
+  };
+  Viewer.prototype._loadModel = function (name, cb) {
+    var self = this;
+    this._ensureGLTF(function (ok) {
+      if (!ok) return cb(null);
+      if (self.modelCache[name] === 'failed') return cb(null);
+      if (self.modelCache[name]) return cb(self.modelCache[name]);
+      if (self._mq[name]) { self._mq[name].push(cb); return; }
+      self._mq[name] = [cb];
+      new THREE.GLTFLoader().load('/api/model?type=' + encodeURIComponent(name), function (g) { self.modelCache[name] = g.scene; var q = self._mq[name]; self._mq[name] = null; q.forEach(function (c) { c(g.scene); }); }, undefined, function () { self.modelCache[name] = 'failed'; var q = self._mq[name] || []; self._mq[name] = null; q.forEach(function (c) { c(null); }); });
+    });
+  };
+  Viewer.prototype._tryModel = function (it, group) {
+    var self = this; this._loadModel(it.model, function (proto) {
+      if (!proto) return;
+      try {
+        var m = proto.clone(true);
+        var bb = new THREE.Box3().setFromObject(m), size = new THREE.Vector3(); bb.getSize(size);
+        var sc = Math.min(it.w / (size.x || 1), it.d / (size.z || 1)); if (!isFinite(sc) || sc <= 0) sc = 1;
+        if (size.y * sc > it.h * 1.6) sc = it.h * 1.6 / (size.y || 1);
+        m.scale.set(sc, sc, sc);
+        bb = new THREE.Box3().setFromObject(m); var c = new THREE.Vector3(); bb.getCenter(c);
+        m.position.set(it.x - c.x, (it.y - it.h / 2) - bb.min.y, it.z - c.z);
+        if (it.ry) m.rotation.y = it.ry;
+        m.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+        group.add(m);
+        (self.slotMeshes[it.slot] || []).forEach(function (mesh) { mesh.visible = false; });
+      } catch (e) {}
+    });
+  };
   Viewer.prototype.build = function (L, cfg) {
     try {
       if (this.root) this.scene.remove(this.root);
-      this.root = new THREE.Group(); this.scene.add(this.root); this.floorGroups = {}; this.ceil = []; this.roof = new THREE.Group(); this.root.add(this.roof);
+      this.root = new THREE.Group(); this.scene.add(this.root); this.floorGroups = {}; this.ceil = []; this.roof = new THREE.Group(); this.root.add(this.roof); this.slotMeshes = {}; this.modelSlots = [];
       var d = window.House3D.describeHouse(L, cfg); this.desc = d; this.coll = d.collision;
-      for (var i = 0; i < d.items.length; i++) { var it = d.items[i], m;
+      for (var i = 0; i < d.items.length; i++) { var it = d.items[i], m, g;
+        if (it.t === 'modelslot') { g = it.floor >= 0 ? this._fg(it.floor) : this.root; this.modelSlots.push({ it: it, group: g }); continue; }
         if (it.t === 'roofpitch') m = this._pyramid(it);
         else if (it.t === 'tree') m = this._treeMesh(it);
-        else { m = new THREE.Mesh(new THREE.BoxGeometry(it.w, it.h, it.d), this._mat(it)); m.position.set(it.x, it.y, it.z); if (it.ry) m.rotation.y = it.ry; }
+        else { m = new THREE.Mesh(this._geo(it), this._mat(it)); m.position.set(it.x, it.y, it.z); if (it.ry) m.rotation.y = it.ry; }
         var cast = (it.t === 'wall' || it.t === 'furn' || it.t === 'roof' || it.t === 'roofpitch' || it.t === 'trim' || it.t === 'tree' || it.t === 'door' || it.t === 'plinth');
         m.castShadow = cast; m.receiveShadow = (it.t !== 'glass' && it.t !== 'lamp' && it.t !== 'tree');
         if (it.t === 'roof' || it.t === 'roofpitch') this.roof.add(m);
         else if (it.t === 'ceil') { m.userData.floor = it.floor; this.ceil.push(m); this.root.add(m); }
-        else if (it.floor >= 0) { (this.floorGroups[it.floor] || (this.floorGroups[it.floor] = (function () { var g = new THREE.Group(); this.root.add(g); return g; }).call(this))).add(m); }
+        else if (it.floor >= 0) { this._fg(it.floor).add(m); }
         else this.root.add(m);
+        if (it.slot) { (this.slotMeshes[it.slot] = this.slotMeshes[it.slot] || []).push(m); }
       }
+      var self2 = this; this.modelSlots.forEach(function (ms) { self2._tryModel(ms.it, ms.group); });
       this._enhance();
       this.cfg = cfg; this.floor = 0; this._spawn(); this._frame(); this._vis();
       var e = this.container.querySelector('.gl-err'); if (e) e.remove();

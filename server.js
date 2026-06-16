@@ -142,6 +142,42 @@ async function render(res, body) {
   } catch (e) { json(res, e.status || 500, { error: String(e.message || e), hint: e.hint }); }
 }
 
+/* Vision: turn a real floor-plan IMAGE (uploaded / from Google) into a structured
+ * layout the 3D builder can use. GPT-4o reads the plan; HouseLayout.fromAI
+ * validates it; falls back to the proven engine if the read isn't usable. */
+async function planFromImage(res, body) {
+  if (!key()) return json(res, 501, { error: 'No OPENAI_API_KEY in .env.' });
+  if (!body.image) return json(res, 400, { error: 'No image provided.' });
+  const spec = {
+    plotW: (+body.plotW >= 6 && +body.plotW <= 80) ? +body.plotW : 9,
+    plotD: (+body.plotD >= 6 && +body.plotD <= 80) ? +body.plotD : 14,
+    floors: Math.min(4, Math.max(1, Math.round(+body.floors || 1))),
+    bedrooms: 3, bathrooms: 2, kitchens: 1, living: 1, dining: true, garage: false,
+    style: body.style || 'modern'
+  };
+  const fp = footprint(spec);
+  const shape = '{"floors":[{"rooms":[{"type":"living|bedroom|kitchen|bathroom|dining|garage|corridor","name":"label from the plan","x":m,"y":m,"w":m,"h":m,"door":{"side":"left|right|top|bottom","pos":m,"width":0.9}}],"corridor":{"x":m,"y":m,"w":m,"h":m},"entrance":{"x":m,"y":m,"width":1.2},"stairs":{"x":m,"y":m,"w":m,"h":m}}],"concept":"one sentence"}';
+  const sys = 'You convert a residential floor-plan IMAGE into structured JSON for a 3D builder. ' +
+    'Express every room as a rectangle in METRES inside a footprint ' + fp.fw.toFixed(1) + ' m wide (x: 0 to ' + fp.fw.toFixed(1) + ') by ' + fp.fh.toFixed(1) + ' m deep (y: 0 to ' + fp.fh.toFixed(1) + '), origin top-left, the street/main entrance at the bottom (y=' + fp.fh.toFixed(1) + '). ' +
+    'Rooms must tile each floor without overlapping and stay inside the footprint. Reproduce the plan faithfully: same rooms, same relative positions/sizes, same names. Give every room a door toward the corridor/stairs. There must be exactly ' + spec.floors + ' floor object(s). Return ONLY JSON: ' + shape;
+  try {
+    const data = await postJSON('chat/completions', {
+      model: PLAN_MODEL, temperature: 0.15, max_tokens: 3000, response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: sys },
+        { role: 'user', content: [
+          { type: 'text', text: 'Convert the floor plan in this image to JSON, matching it as closely as you can. The building has ' + spec.floors + ' floor(s).' },
+          { type: 'image_url', image_url: { url: body.image } }
+        ] }
+      ]
+    });
+    const raw = JSON.parse((data.choices && data.choices[0] && data.choices[0].message.content) || '{}');
+    let layout = HouseLayout.fromAI(raw, spec), source = 'from-image';
+    if (!layout) { layout = HouseLayout.computeLayout(spec); source = 'fallback'; }
+    json(res, 200, { ok: source === 'from-image', layout: layout, concept: raw.concept || '', source: source });
+  } catch (e) { json(res, e.status || 500, { error: String(e.message || e), hint: e.hint }); }
+}
+
 async function referenceImages(res, query) {
   const k = process.env.UNSPLASH_ACCESS_KEY;
   if (!k) return json(res, 501, { error: 'Add UNSPLASH_ACCESS_KEY to .env to enable web image search.' });
@@ -270,6 +306,23 @@ async function extractFromPrompt(spec) {
   return JSON.parse((data.choices && data.choices[0] && data.choices[0].message.content) || '{}');
 }
 
+/* Deterministic ensuite: when the brief asks for a bathroom in/with a bedroom,
+ * carve an attached bath off the master so the request visibly takes effect. */
+function ensuiteify(layout) {
+  (layout.floors || []).forEach(function (fl) {
+    var bed = null;
+    fl.rooms.forEach(function (r) { if (r.type === 'bedroom' && /master/i.test(r.name)) bed = bed || r; });
+    if (!bed) fl.rooms.forEach(function (r) { if (r.type === 'bedroom') bed = bed || r; });
+    if (!bed || bed.w < 3 || bed.h < 2.8) return;
+    var bw = Math.max(1.6, Math.min(2.3, bed.w * 0.38)), side = bed.door ? bed.door.side : 'right', bx;
+    if (side === 'left' || side === 'top') { bx = bed.x + bed.w - bw; bed.w -= bw; }
+    else { bx = bed.x; bed.x += bw; bed.w -= bw; }
+    bed.area = bed.w * bed.h;
+    fl.rooms.push({ type: 'bathroom', name: 'Ensuite', x: bx, y: bed.y, w: bw, h: bed.h, area: bw * bed.h,
+      door: { side: (side === 'left' || side === 'top') ? 'left' : 'right', pos: bed.y + bed.h / 2, width: 0.8 }, windows: [] });
+  });
+}
+
 async function aiFloorPlan(res, spec) {
   let promptConcept = '', aiCustom = null;
   if (spec.prompt && key()) {
@@ -351,6 +404,35 @@ async function texture(res, name, map) {
   } catch (e) { res.writeHead(502); res.end('texture proxy failed: ' + String(e.message || e)); }
 }
 
+/* Real CC0 furniture models proxied from Poly Pizza (free key) and cached to
+ * public/models so the browser can load them same-origin. Falls back to the
+ * procedural furniture in the 3D viewer if no key / not found. */
+async function model(res, type) {
+  const safe = String(type || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim().slice(0, 30);
+  if (!safe) { res.writeHead(404); return res.end('no type'); }
+  const dir = path.join(PUBLIC, 'models');
+  const file = path.join(dir, safe.replace(/ /g, '_') + '.glb');
+  try {
+    if (fs.existsSync(file)) { res.writeHead(200, { 'Content-Type': 'model/gltf-binary', 'Cache-Control': 'public, max-age=604800' }); return fs.createReadStream(file).pipe(res); }
+    const k = process.env.POLY_PIZZA_KEY;
+    if (!k) { res.writeHead(404); return res.end('POLY_PIZZA_KEY not set'); }
+    const sr = await fetch('https://api.poly.pizza/v1.1/search/' + encodeURIComponent(safe), { headers: { 'x-auth-token': k } });
+    if (!sr.ok) throw new Error('poly search ' + sr.status);
+    const data = await sr.json();
+    const list = data.results || data.Results || [];
+    let url = null;
+    for (const m of list) { const dl = m.Download || m.download || m.url; if (dl && /\.glb/i.test(dl)) { url = dl; break; } }
+    if (!url && list[0]) url = list[0].Download || list[0].download;
+    if (!url) throw new Error('no glb result');
+    const mr = await fetch(url);
+    if (!mr.ok) throw new Error('model fetch ' + mr.status);
+    const buf = Buffer.from(await mr.arrayBuffer());
+    try { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(file, buf); } catch (_) {}
+    res.writeHead(200, { 'Content-Type': 'model/gltf-binary', 'Cache-Control': 'public, max-age=604800' });
+    res.end(buf);
+  } catch (e) { res.writeHead(502); res.end('model proxy: ' + String(e.message || e)); }
+}
+
 function serveStatic(req, res) {
   let p = decodeURIComponent(req.url.split('?')[0]); if (p === '/') p = '/index.html';
   const file = path.normalize(path.join(PUBLIC, p));
@@ -378,9 +460,11 @@ http.createServer(async (req, res) => {
   });
   if (req.method === 'POST' && u.pathname === '/api/ai/design-brief') return designBrief(res, await readBody(req));
   if (req.method === 'POST' && u.pathname === '/api/ai/floor-plan') return aiFloorPlan(res, await readBody(req));
+  if (req.method === 'POST' && u.pathname === '/api/ai/plan-from-image') return planFromImage(res, await readBody(req));
   if (req.method === 'POST' && u.pathname === '/api/ai/render') return render(res, await readBody(req));
   if (req.method === 'GET' && u.pathname === '/api/reference-images') return referenceImages(res, (u.searchParams.get('q') || 'house interior').slice(0, 120));
   if (req.method === 'GET' && u.pathname === '/api/texture') return texture(res, (u.searchParams.get('name') || '').slice(0, 20), (u.searchParams.get('map') || '').slice(0, 8));
+  if (req.method === 'GET' && u.pathname === '/api/model') return model(res, u.searchParams.get('type') || '');
   serveStatic(req, res);
 }).listen(PORT, () => console.log('\n  ForthHome AI House Designer:  http://localhost:' + PORT +
   '\n  OpenAI: ' + (key() ? ('key present — plans ' + PLAN_MODEL + ', text ' + TEXT_MODEL + ', images ' + IMAGE_MODEL) : 'NOT configured') +

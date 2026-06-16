@@ -217,6 +217,62 @@ async function searchWeb() {
 }
 function syncChips() { $('diningChip').classList.toggle('on', $('dining').checked); $('garageChip').classList.toggle('on', $('garage').checked); }
 
+/* ---------------- build from a real floor-plan image (GPT-4o vision) ---------------- */
+function buildFromImageFile(file) {
+  if (!file) return;
+  var rd = new FileReader();
+  rd.onload = function () {
+    var img = new Image();
+    img.onload = function () {
+      var mx = 1500, sc = Math.min(1, mx / Math.max(img.width, img.height));
+      var c = document.createElement('canvas'); c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      planImgUpload(c.toDataURL('image/png'));
+    };
+    img.onerror = function () { toast('Could not read that image file'); };
+    img.src = rd.result;
+  };
+  rd.readAsDataURL(file);
+}
+async function planImgUpload(dataUrl) {
+  var btn = $('planImgBtn'), lbl = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Reading plan…'; }
+  toast('Reading your floor plan with AI vision…');
+  try {
+    cfg = readForm();
+    var r = await fetch('/api/ai/plan-from-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: dataUrl, plotW: cfg.plotW, plotD: cfg.plotD, floors: cfg.floors, style: cfg.style }) });
+    var d = await r.json();
+    if (!r.ok || !d.layout) throw new Error((d && (d.error || d.hint)) || 'Could not read the plan');
+    showPlanConfirm(d);
+  } catch (e) { toast('Plan image: ' + e.message); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = lbl; } }
+}
+
+function showPlanConfirm(d) {
+  var L = d.layout, blocks = '';
+  (L.floors || []).forEach(function (fl, i) {
+    var names = (fl.rooms || []).filter(function (r) { return r.type !== 'corridor'; }).map(function (r) {
+      return '<span style="display:inline-block;background:#1c2533;border:1px solid #2b3550;border-radius:7px;padding:3px 8px;margin:3px 4px 0 0;font-size:12px">' + r.name + ' <span style="color:#7b8694">' + r.w.toFixed(1) + '×' + r.h.toFixed(1) + 'm</span></span>';
+    });
+    blocks += '<div style="margin:8px 0"><b style="color:#9fd0ff">Floor ' + (i + 1) + '</b><div>' + (names.join('') || '—') + '</div></div>';
+  });
+  var ov = document.createElement('div');
+  ov.style.cssText = 'position:absolute;inset:0;background:rgba(8,10,14,.74);display:flex;align-items:center;justify-content:center;z-index:40;backdrop-filter:blur(3px);padding:24px';
+  ov.innerHTML = '<div style="background:#161b24;border:1px solid #2b3340;border-radius:14px;max-width:540px;width:100%;padding:20px;box-shadow:0 24px 70px rgba(0,0,0,.55)">' +
+    '<h3 style="margin:0 0 10px;color:#fff;font-size:17px;font-weight:800">Detected from your floor plan</h3>' +
+    (d.source !== 'from-image' ? '<div style="background:#211a12;border:1px solid #7a5a2a;color:#ffd9a3;padding:8px 10px;border-radius:8px;font-size:12.5px;margin-bottom:10px">⚠ This plan was hard to read — the result is a close match, not an exact copy. A cleaner, single-floor image reads best.</div>' : '') +
+    (d.concept ? '<div style="color:#cdd6e4;font-size:13px;line-height:1.5;margin-bottom:8px">' + d.concept + '</div>' : '') +
+    '<div style="color:#dbe2ec;max-height:260px;overflow:auto">' + blocks + '</div>' +
+    '<div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end">' +
+    '<button id="pcfCancel" style="background:#1c212b;border:1px solid #2b3340;color:#eef1f6;border-radius:9px;padding:10px 14px;cursor:pointer;font-weight:600;font-family:inherit">Try another image</button>' +
+    '<button id="pcfBuild" style="background:linear-gradient(180deg,#37c98a,#21a76e);border:0;color:#fff;border-radius:9px;padding:10px 16px;cursor:pointer;font-weight:700;font-family:inherit">Build this house ✓</button>' +
+    '</div></div>';
+  document.querySelector('main').appendChild(ov);
+  document.getElementById('pcfBuild').onclick = function () { ov.remove(); applyLayout(d.layout, { concept: d.concept, source: d.source }); toast('Built from your floor plan ✓'); };
+  document.getElementById('pcfCancel').onclick = function () { ov.remove(); toast('Cancelled — upload another plan image'); };
+  ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
+}
+
 /* ---------------- boot ---------------- */
 function randomize() { $('plotW').value = 12 + Math.floor(Math.random() * 16); $('plotD').value = 10 + Math.floor(Math.random() * 12); $('floors').value = 1 + Math.floor(Math.random() * 3); $('bedrooms').value = 1 + Math.floor(Math.random() * 5); $('bathrooms').value = 1 + Math.floor(Math.random() * 3); $('kitchens').value = 1; $('living').value = 1; $('style').value = ['modern', 'traditional', 'minimalist', 'scandinavian', 'industrial'][Math.floor(Math.random() * 5)]; $('dining').checked = true; $('garage').checked = Math.random() > 0.4; syncChips(); generate(false); }
 function boot() {
@@ -232,6 +288,7 @@ function boot() {
   $('schemeBtn').onclick = genScheme; $('diagBtn').onclick = function () { diagnoseAI(false); };
   document.querySelectorAll('[data-view]').forEach(function (b) { b.onclick = function () { if (!cfg) { toast('Generate a house first'); return; } renderView(b.dataset.view, b.textContent); }; });
   $('uploadBtn').onclick = function () { $('fileInput').click(); }; $('fileInput').onchange = function (e) { handleFiles(e.target.files); };
+  if ($('planImgBtn')) { $('planImgBtn').onclick = function () { $('planImgInput').click(); }; $('planImgInput').onchange = function (e) { buildFromImageFile(e.target.files[0]); e.target.value = ''; }; }
   $('webSearchBtn').onclick = searchWeb; $('webQuery').addEventListener('keydown', function (e) { if (e.key === 'Enter') searchWeb(); });
   document.querySelectorAll('#mode3d button').forEach(function (b) { b.onclick = function () { if (viewer) viewer.setMode(b.dataset.m); document.querySelectorAll('#mode3d button').forEach(function (x) { x.classList.remove('active'); }); b.classList.add('active'); }; });
   $('cutBtn').onclick = function () { cut = !cut; $('cutBtn').textContent = 'Cutaway: ' + (cut ? 'on' : 'off'); if (viewer) viewer.setCutaway(cut); };

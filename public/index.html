@@ -151,6 +151,12 @@
         <div class="hint">Floor plans use GPT-4o + free web search (DuckDuckGo). Renders need org verified for <code>gpt-image-1</code>.</div>
       </div>
     </div>
+    <div class="sec promptsec">
+      <h2>📐 Build from a real floor plan</h2>
+      <button class="primary" id="planImgBtn" style="background:linear-gradient(180deg,#37c98a,#21a76e);box-shadow:0 6px 18px rgba(33,167,110,.3)">Upload a floor-plan image</button>
+      <input id="planImgInput" type="file" accept="image/*" style="display:none">
+      <div class="hint">Google a plan you like (e.g. <b>"5 marla house plan"</b>), save the image, and upload it — GPT‑4o Vision reads it and rebuilds it as your 3D house. Set <b>Floors</b> to match the plan first.</div>
+    </div>
     <div class="sec">
       <h2>Reference images</h2>
       <div class="mini"><button class="ghost" id="uploadBtn">Upload inspiration</button></div>
