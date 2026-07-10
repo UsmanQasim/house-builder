@@ -1,13 +1,27 @@
 {
-  "name": "house-builder-mvp",
-  "version": "1.0.0",
-  "description": "AI house designer: accurate 2D floor plan + photorealistic OpenAI renders",
-  "main": "server.js",
-  "type": "commonjs",
+  "name": "house-builder",
+  "version": "3.0.0",
+  "description": "ForthHome - AI house designer (TypeScript): bespoke AI floor plans + PBR walkable 3D + photoreal renders",
+  "type": "module",
+  "main": "build/server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "npm run build && node build/server.js",
+    "build": "npm run build:server && npm run build:client",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:client": "vite build",
+    "typecheck": "tsc -p tsconfig.json",
+    "watch": "vite build --watch",
+    "start": "node build/server.js",
+    "test": "npm run build:server && node --test tests/layout.test.mjs tests/generator.test.mjs tests/providers.test.mjs"
   },
   "engines": { "node": ">=18" },
-  "dependencies": {}
+  "dependencies": {
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "@types/node": "^22.9.0",
+    "@types/three": "^0.170.0"
+  }
 }

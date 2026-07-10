@@ -3,5 +3,7 @@
 .env.*
 !.env.example
 node_modules/
+dist/
+build/
 *.log
-.DS_Store
+.DS_
