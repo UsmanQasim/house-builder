@@ -7,12 +7,12 @@ import { HouseLayout } from '../build/src/engine/layout.js';
 const spec = { plotW: 10, plotD: 12, floors: 1, bedrooms: 2, bathrooms: 1, kitchens: 1, living: 1, dining: false, garage: false, style: 'modern' };
 const goodPlan = { concept: 'Bespoke split-hall design', floors: [{ rooms: [
   { type: 'bedroom', name: 'Master Bedroom', x: 0, y: 0, w: 4, h: 5, door: { side: 'right', pos: 2.5 } },
-  { type: 'bedroom', name: 'Bedroom 2', x: 0, y: 5, w: 4, h: 5.8, door: { side: 'right', pos: 7.5 } },
-  { type: 'corridor', name: 'Hallway', x: 4, y: 0, w: 1.4, h: 10.8 },
+  { type: 'bedroom', name: 'Bedroom 2', x: 0, y: 5, w: 4, h: 6, door: { side: 'right', pos: 7.5 } },
+  { type: 'corridor', name: 'Hallway', x: 4, y: 0, w: 1.4, h: 11 },
   { type: 'kitchen', name: 'Kitchen', x: 5.4, y: 0, w: 3.6, h: 4, door: { side: 'left', pos: 2 } },
   { type: 'bathroom', name: 'Bathroom', x: 5.4, y: 4, w: 3.6, h: 2.3, door: { side: 'left', pos: 5 } },
-  { type: 'living', name: 'Living', x: 5.4, y: 6.3, w: 3.6, h: 4.5, door: { side: 'left', pos: 8 } }
-], entrance: { x: 4.7, y: 10.8, width: 1.2 } }] };
+  { type: 'living', name: 'Living', x: 5.4, y: 6.3, w: 3.6, h: 4.7, door: { side: 'left', pos: 8 } }
+], entrance: { x: 4.7, y: 11, width: 1.2 } }] };
 const garbagePlan = { floors: [{ rooms: [{ type: 'bedroom', name: 'A', x: 0, y: 0, w: 50, h: 50 }] }] };
 
 function mockProvider(responses) {
@@ -44,7 +44,7 @@ test('retries with violation feedback, then accepts the corrected plan', async (
   assert.ok(HouseLayout.validateLayout(out.layout, spec).ok);
 });
 
-test('returns null when the AI fails both attempts (server falls back to templates)', async () => {
+test('returns null when AI fails both attempts so the server can use the validated planner', async () => {
   const P = mockProvider([garbagePlan, garbagePlan]);
   const out = await generateBespokePlan(P, spec, []);
   assert.equal(out, null);

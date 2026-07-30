@@ -1,13 +1,15 @@
 /* AI provider abstraction (server-side only — keys never reach the browser).
  *
  * Providers:
- *   - openai  : GPT-4o text/JSON + gpt-image-1 images
- *   - gemini  : Gemini text/JSON + Nano Banana Pro (gemini-3-pro-image-preview) images
+ *   - openai  : GPT-5.6 text/JSON + GPT Image 2 images
+ *   - gemini  : Gemini text/JSON + Nano Banana Pro (gemini-3-pro-image) images
  * Selection:
  *   - text/plan reasoning : getTextProvider()  — OpenAI preferred, Gemini fallback
  *   - image generation    : getImageProvider() — IMAGE_PROVIDER env wins; else Nano
  *                           Banana Pro when GEMINI_API_KEY is set; else OpenAI.
  * Add another provider: implement Provider, register in PROVIDERS. */
+
+import { boundedPositiveInteger, fetchWithTimeout, parseImageReference, type ParsedImageReference } from './net.js';
 
 export interface ChatMessagePart { type: string; text?: string; image_url?: { url: string }; }
 export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: string | ChatMessagePart[]; }
@@ -23,15 +25,47 @@ export interface Provider {
   generateImage(opts: ImageOptions): Promise<{ b64: string | null; url: string | null }>;
 }
 
-const OPENAI_TEXT_MODEL = () => process.env.OPENAI_TEXT_MODEL || 'gpt-4o';
-const OPENAI_PLAN_MODEL = () => process.env.OPENAI_PLAN_MODEL || 'gpt-4o';
-const OPENAI_IMAGE_MODEL = () => process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
+const OPENAI_TEXT_MODEL = () => process.env.OPENAI_TEXT_MODEL || 'gpt-5.6-terra';
+const OPENAI_PLAN_MODEL = () => process.env.OPENAI_PLAN_MODEL || 'gpt-5.6-sol';
+const OPENAI_IMAGE_MODEL = () => process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
 const openaiKey = () => process.env.OPENAI_API_KEY;
+const aiEnabled = () => process.env.AI_OFFLINE !== '1';
 
 const GEMINI_TEXT_MODEL = () => process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash';
-const GEMINI_IMAGE_MODEL = () => process.env.GEMINI_IMAGE_MODEL || 'gemini-3-pro-image-preview'; // Nano Banana Pro
+const GEMINI_IMAGE_MODEL = () => process.env.GEMINI_IMAGE_MODEL || 'gemini-3-pro-image'; // Nano Banana Pro
 const geminiKey = () => process.env.GEMINI_API_KEY;
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+
+function redactSecrets(value: unknown): string {
+  let message = String(value || 'Unknown provider error');
+  const keys = [
+    process.env.OPENAI_API_KEY, process.env.GEMINI_API_KEY, process.env.RODIN_API_KEY,
+    process.env.HYPER3D_API_KEY, process.env.POLY_PIZZA_KEY, process.env.BRAVE_SEARCH_API_KEY,
+    process.env.UNSPLASH_ACCESS_KEY, process.env.APP_ACCESS_TOKEN
+  ].filter((secret): secret is string => typeof secret === 'string' && secret.length >= 6);
+  for (const secret of keys) message = message.split(secret).join('[redacted]');
+  return message.replace(/([?&]key=)[^&\s"']+/gi, '$1[redacted]').replace(/Bearer\s+[^\s,"']+/gi, 'Bearer [redacted]').slice(0, 1200);
+}
+
+function imageReferences(values: ImageOptions['references'], max: number): ParsedImageReference[] {
+  const result: ParsedImageReference[] = [];
+  for (const value of values || []) {
+    const parsed = parseImageReference(value);
+    if (parsed) result.push(parsed);
+    if (result.length >= max) break;
+  }
+  return result;
+}
+
+const REASONING_EFFORTS = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+function reasoningEffort(model: string): string {
+  const configured = String(process.env.OPENAI_REASONING_EFFORT || 'medium').trim().toLowerCase();
+  if (!REASONING_EFFORTS.has(configured)) return 'medium';
+  // GPT-5.6 supports none/low/medium/high/xhigh/max; "minimal" belongs to
+  // earlier GPT-5 variants and is rejected by the 5.6 family.
+  if (/^gpt-5\.6(?:-|$)/.test(model) && configured === 'minimal') return 'medium';
+  return configured;
+}
 
 /* ------------------------------ retry helper ------------------------------ */
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -54,7 +88,7 @@ export async function withRetry<T>(fn: () => Promise<T>, opts: { retries?: numbe
 }
 
 function apiError(message: string, status: number, hint?: string): ApiError {
-  const e = new Error(message) as ApiError;
+  const e = new Error(redactSecrets(message)) as ApiError;
   e.status = status;
   if (hint) e.hint = hint;
   else if (status === 429) e.hint = 'Rate limited — the request was retried automatically. Wait a minute and try again.';
@@ -73,9 +107,9 @@ function multipart(fields: Record<string, string>, files: { name: string; filena
 
 /* ================================ OpenAI ================================ */
 async function openaiPost(endpoint: string, payload: unknown): Promise<Record<string, unknown>> {
-  const r = await fetch('https://api.openai.com/v1/' + endpoint, {
+  const r = await fetchWithTimeout('https://api.openai.com/v1/' + endpoint, {
     method: 'POST', headers: { Authorization: 'Bearer ' + openaiKey(), 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-  });
+  }, 120_000);
   const data = await r.json().catch(() => ({})) as { error?: { message?: string } };
   if (!r.ok) {
     const m = (data.error && data.error.message) || ('OpenAI HTTP ' + r.status);
@@ -88,46 +122,61 @@ async function openaiPost(endpoint: string, payload: unknown): Promise<Record<st
 
 export const OpenAIProvider: Provider = {
   id: 'openai',
-  available: () => !!openaiKey(),
+  available: () => aiEnabled() && !!openaiKey(),
 
   async diagnose(): Promise<Diagnosis> {
+    if (!aiEnabled()) return { ok: false, stage: 'disabled', message: 'AI calls are disabled by AI_OFFLINE=1. The validated local planner remains available.' };
     if (!openaiKey()) return { ok: false, stage: 'key', message: 'No OPENAI_API_KEY found in .env. Add it and restart the server.' };
     try {
-      const r = await fetch('https://api.openai.com/v1/models', { headers: { Authorization: 'Bearer ' + openaiKey() } });
+      const r = await fetchWithTimeout('https://api.openai.com/v1/models', { headers: { Authorization: 'Bearer ' + openaiKey() } });
       const data = await r.json().catch(() => ({})) as { data?: { id: string }[]; error?: { message?: string } };
       if (!r.ok) {
-        const m = (data.error && data.error.message) || ('HTTP ' + r.status);
+        const m = redactSecrets((data.error && data.error.message) || ('HTTP ' + r.status));
         return { ok: false, stage: 'auth', message: r.status === 401 ? 'Your OpenAI API key is invalid or revoked. Create a new one at platform.openai.com/api-keys.' : m };
       }
       const ids = (data.data || []).map(x => x.id);
+      const textModel = OPENAI_PLAN_MODEL();
+      const hasText = ids.includes(textModel) || ids.includes(textModel.replace(/-sol$/, ''));
       const hasImg = ids.includes(OPENAI_IMAGE_MODEL());
-      return { ok: hasImg, keyValid: true, imageModelAvailable: hasImg, imageModel: OPENAI_IMAGE_MODEL(),
-        message: hasImg ? 'OpenAI key valid. ' + OPENAI_IMAGE_MODEL() + ' available — renders should work.'
-          : 'OpenAI key valid, but ' + OPENAI_IMAGE_MODEL() + ' is NOT enabled for this org (verify your organization). Floor plans and schemes still work. Tip: add GEMINI_API_KEY to use Nano Banana Pro for images instead.' };
-    } catch (e) { return { ok: false, stage: 'network', message: String((e as Error).message || e) }; }
+      return { ok: hasText && hasImg, keyValid: true, textModelAvailable: hasText, imageModelAvailable: hasImg, imageModel: OPENAI_IMAGE_MODEL(),
+        message: 'OpenAI key valid. Plans: ' + (hasText ? textModel + ' ready' : textModel + ' unavailable') +
+          '. Renders: ' + (hasImg ? OPENAI_IMAGE_MODEL() + ' ready.' : OPENAI_IMAGE_MODEL() + ' unavailable for this project.') };
+    } catch (e) { return { ok: false, stage: 'network', message: redactSecrets((e as Error).message || e) }; }
   },
 
   async chatJSON<T>(opts: ChatOptions): Promise<T> {
+    const model = opts.model || OPENAI_PLAN_MODEL();
+    const isReasoningModel = /^gpt-5(?:\.|-|$)/.test(model);
     const payload: Record<string, unknown> = {
-      model: opts.model || OPENAI_PLAN_MODEL(),
-      temperature: opts.temperature ?? 0.3,
+      model,
       response_format: { type: 'json_object' },
       messages: opts.messages
     };
-    if (opts.maxTokens) payload.max_tokens = opts.maxTokens;
+    if (isReasoningModel) {
+      payload.reasoning_effort = reasoningEffort(model);
+      if (opts.maxTokens !== undefined) payload.max_completion_tokens = Math.max(boundedPositiveInteger(opts.maxTokens, 4000, 1, 128_000), 8000);
+    } else {
+      payload.temperature = opts.temperature ?? 0.3;
+      if (opts.maxTokens !== undefined) payload.max_tokens = boundedPositiveInteger(opts.maxTokens, 4000, 1, 128_000);
+    }
     const data = await withRetry(() => openaiPost('chat/completions', payload));
     const choices = data.choices as { message: { content: string } }[] | undefined;
     return JSON.parse((choices && choices[0] && choices[0].message.content) || '{}') as T;
   },
 
   async generateImage(opts: ImageOptions): Promise<{ b64: string | null; url: string | null }> {
-    const refs = (opts.references || []).slice(0, 3);
+    const refs = imageReferences(opts.references, 3);
     const size = opts.size || '1024x1024', quality = opts.quality || 'medium';
     const run = async (): Promise<Record<string, unknown>> => {
       if (refs.length) {
-        const files = refs.map((r, i) => ({ name: 'image[]', filename: 'ref' + i + '.png', type: r.type || 'image/png', buffer: Buffer.from(r.b64, 'base64') }));
-        const mp = multipart({ model: OPENAI_IMAGE_MODEL(), prompt: opts.prompt + ' Use the supplied reference image(s) for style, palette and mood.', size, quality, n: '1' }, files);
-        const r = await fetch('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: 'Bearer ' + openaiKey(), 'Content-Type': mp.contentType }, body: mp.body });
+        const files = refs.map((r, i) => ({
+          name: 'image[]',
+          filename: 'ref' + i + (r.type === 'image/jpeg' ? '.jpg' : r.type === 'image/webp' ? '.webp' : '.png'),
+          type: r.type,
+          buffer: Buffer.from(r.b64, 'base64')
+        }));
+        const mp = multipart({ model: OPENAI_IMAGE_MODEL(), prompt: opts.prompt, size, quality, n: '1' }, files);
+        const r = await fetchWithTimeout('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: 'Bearer ' + openaiKey(), 'Content-Type': mp.contentType }, body: mp.body }, 120_000);
         const data = await r.json().catch(() => ({})) as { error?: { message?: string } };
         if (!r.ok) throw apiError((data.error && data.error.message) || ('OpenAI HTTP ' + r.status), r.status);
         return data as Record<string, unknown>;
@@ -159,9 +208,9 @@ function toGeminiParts(msg: ChatMessage): GeminiPart[] {
 }
 
 async function geminiGenerate(model: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const r = await fetch(GEMINI_BASE + '/models/' + model + ':generateContent?key=' + geminiKey(), {
+  const r = await fetchWithTimeout(GEMINI_BASE + '/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(geminiKey() || ''), {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-  });
+  }, 120_000);
   const data = await r.json().catch(() => ({})) as { error?: { message?: string } };
   if (!r.ok) {
     const m = (data.error && data.error.message) || ('Gemini HTTP ' + r.status);
@@ -173,20 +222,23 @@ async function geminiGenerate(model: string, body: Record<string, unknown>): Pro
 
 export const GeminiProvider: Provider = {
   id: 'gemini',
-  available: () => !!geminiKey(),
+  available: () => aiEnabled() && !!geminiKey(),
 
   async diagnose(): Promise<Diagnosis> {
+    if (!aiEnabled()) return { ok: false, stage: 'disabled', message: 'AI calls are disabled by AI_OFFLINE=1. The validated local planner remains available.' };
     if (!geminiKey()) return { ok: false, stage: 'key', message: 'No GEMINI_API_KEY found in .env. Get one free at aistudio.google.com and restart.' };
     try {
-      const r = await fetch(GEMINI_BASE + '/models?key=' + geminiKey() + '&pageSize=200');
+      const r = await fetchWithTimeout(GEMINI_BASE + '/models?key=' + encodeURIComponent(geminiKey() || '') + '&pageSize=200');
       const data = await r.json().catch(() => ({})) as { models?: { name: string }[]; error?: { message?: string } };
-      if (!r.ok) return { ok: false, stage: 'auth', message: (data.error && data.error.message) || ('Gemini HTTP ' + r.status) };
+      if (!r.ok) return { ok: false, stage: 'auth', message: redactSecrets((data.error && data.error.message) || ('Gemini HTTP ' + r.status)) };
       const names = (data.models || []).map(m => m.name.replace(/^models\//, ''));
       const hasImg = names.some(n => n === GEMINI_IMAGE_MODEL());
-      return { ok: hasImg, keyValid: true, imageModelAvailable: hasImg, imageModel: GEMINI_IMAGE_MODEL(),
-        message: hasImg ? 'Gemini key valid. Nano Banana Pro (' + GEMINI_IMAGE_MODEL() + ') available — image renders enabled.'
-          : 'Gemini key valid, but "' + GEMINI_IMAGE_MODEL() + '" is not in your model list. Set GEMINI_IMAGE_MODEL in .env to one of your available image models (e.g. gemini-3-1-flash-image / gemini-2.5-flash-image).' };
-    } catch (e) { return { ok: false, stage: 'network', message: String((e as Error).message || e) }; }
+      const hasText = names.some(n => n === GEMINI_TEXT_MODEL());
+      return { ok: hasImg && hasText, keyValid: true, textModelAvailable: hasText, imageModelAvailable: hasImg, imageModel: GEMINI_IMAGE_MODEL(),
+        message: hasImg && hasText
+          ? 'Gemini key valid. Nano Banana Pro (' + GEMINI_IMAGE_MODEL() + ') and text model ' + GEMINI_TEXT_MODEL() + ' are available.'
+          : 'Gemini key valid, but unavailable model(s): ' + [!hasImg && GEMINI_IMAGE_MODEL(), !hasText && GEMINI_TEXT_MODEL()].filter(Boolean).join(', ') + '. Set GEMINI_IMAGE_MODEL / GEMINI_TEXT_MODEL in .env to models listed for this key.' };
+    } catch (e) { return { ok: false, stage: 'network', message: redactSecrets((e as Error).message || e) }; }
   },
 
   async chatJSON<T>(opts: ChatOptions): Promise<T> {
@@ -211,7 +263,7 @@ export const GeminiProvider: Provider = {
    * are passed as inline images; the model preserves what the prompt doesn't change). */
   async generateImage(opts: ImageOptions): Promise<{ b64: string | null; url: string | null }> {
     const parts: GeminiPart[] = [{ text: opts.prompt }];
-    (opts.references || []).slice(0, 4).forEach(r => parts.push({ inlineData: { mimeType: r.type || 'image/png', data: r.b64 } }));
+    imageReferences(opts.references, 4).forEach(r => parts.push({ inlineData: { mimeType: r.type, data: r.b64 } }));
     const body: Record<string, unknown> = {
       contents: [{ role: 'user', parts }],
       generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }

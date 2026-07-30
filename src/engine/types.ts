@@ -37,6 +37,12 @@ export interface Layout {
   templateId?: string;
   planConcept?: string;
   planInspiration?: string;
+  /** Reproducible seed used by the procedural candidate generator. */
+  planSeed?: number;
+  /** Architectural quality score of the selected procedural candidate. */
+  planScore?: number;
+  /** Number of candidate layouts evaluated for this result. */
+  planCandidates?: number;
 }
 
 export interface Spec {
@@ -47,11 +53,24 @@ export interface Spec {
   style: StyleName | string;
   prompt?: string;
   accents?: Partial<Record<RoomType, string>>;
-  /** When true, validateLayout also enforces exact bedroom/bathroom counts. */
+  /** Optional deterministic seed. Omit it to request a fresh variation. */
+  seed?: number;
+  /** Optional named spaces such as office, laundry, pantry or utility. */
+  customRooms?: CustomRoomRequest[];
+  /** Deprecated compatibility flag; supplied room counts are always exact. */
   strictCounts?: boolean;
 }
 
 export interface Validation { ok: boolean; score: number; issues: string[]; }
+
+/** Backward-compatible request for spaces outside the core room taxonomy. */
+export interface CustomRoomRequest {
+  name: string;
+  count?: number;
+  minW?: number;
+  minH?: number;
+  preferredFloor?: number;
+}
 
 /* Raw (untrusted) AI plan shapes */
 export interface RawDoor { side?: string; pos?: number | string; width?: number; }

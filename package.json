@@ -12,7 +12,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "watch": "vite build --watch",
     "start": "node build/server.js",
-    "test": "npm run build:server && node --test tests/layout.test.mjs tests/generator.test.mjs tests/providers.test.mjs"
+    "test": "npm run build:server && node --test tests/layout.test.mjs tests/generator.test.mjs tests/providers.test.mjs tests/stairwell.test.mjs"
   },
   "engines": { "node": ">=18" },
   "dependencies": {

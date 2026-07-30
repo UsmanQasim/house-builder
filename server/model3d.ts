@@ -3,6 +3,8 @@
  * Used by /api/model when a furniture GLB is not in the local cache. Results are
  * cached to public/models so each furniture type is generated at most once. */
 
+import { fetchWithTimeout, readResponseBuffer } from './net.js';
+
 const BASE = 'https://api.hyper3d.com/api/v2';
 const key = () => process.env.RODIN_API_KEY || process.env.HYPER3D_API_KEY;
 
@@ -23,6 +25,18 @@ const PROMPTS: Record<string, string> = {
   car: 'modern family SUV car, neutral gray'
 };
 const ALLOWED = new Set(Object.keys(PROMPTS));
+export const MAX_FURNITURE_MODEL_BYTES = 30 * 1024 * 1024;
+
+export function normalizeFurnitureType(value: unknown): string | null {
+  const normalized = String(value || '').toLowerCase().trim().replace(/\s+/g, ' ');
+  return ALLOWED.has(normalized) ? normalized : null;
+}
+
+export function isValidFurnitureGLB(buffer: Buffer): boolean {
+  if (buffer.length < 12 || buffer.length > MAX_FURNITURE_MODEL_BYTES) return false;
+  if (buffer.toString('ascii', 0, 4) !== 'glTF') return false;
+  return buffer.readUInt32LE(4) === 2 && buffer.readUInt32LE(8) === buffer.length;
+}
 
 const inflight = new Map<string, Promise<Buffer | null>>();
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -36,7 +50,7 @@ function form(fields: Record<string, string>): FormData {
 async function post(path: string, body: FormData | string, jsonBody = false): Promise<Record<string, unknown>> {
   const headers: Record<string, string> = { Authorization: 'Bearer ' + key() };
   if (jsonBody) headers['Content-Type'] = 'application/json';
-  const r = await fetch(BASE + path, { method: 'POST', headers, body });
+  const r = await fetchWithTimeout(BASE + path, { method: 'POST', headers, body }, 120_000);
   const data = await r.json().catch(() => ({})) as Record<string, unknown> & { error?: unknown; message?: string };
   if (!r.ok) throw new Error('Rodin ' + path + ' HTTP ' + r.status + (data.message ? ': ' + data.message : ''));
   return data;
@@ -74,16 +88,18 @@ async function generateOnce(type: string): Promise<Buffer | null> {
   const files = (dl.list as { url: string; name: string }[] | undefined) || [];
   const glb = files.find(f => /\.glb$/i.test(f.name)) || files[0];
   if (!glb || !glb.url) throw new Error('Rodin: no GLB in download list');
-  const fr = await fetch(glb.url);
+  const fr = await fetchWithTimeout(glb.url, {}, 120_000);
   if (!fr.ok) throw new Error('Rodin: GLB fetch HTTP ' + fr.status);
-  return Buffer.from(await fr.arrayBuffer());
+  const buffer = await readResponseBuffer(fr, MAX_FURNITURE_MODEL_BYTES);
+  if (!isValidFurnitureGLB(buffer)) throw new Error('Rodin: downloaded file is not a valid bounded GLB');
+  return buffer;
 }
 
 /** Generate a furniture GLB via Rodin. Deduped per type; returns null when
  * unavailable/unknown type so callers can fall through to other sources. */
 export function generateFurnitureGLB(type: string): Promise<Buffer | null> {
-  const t = type.toLowerCase().trim();
-  if (!rodinAvailable() || !ALLOWED.has(t)) return Promise.resolve(null);
+  const t = normalizeFurnitureType(type);
+  if (!rodinAvailable() || !t) return Promise.resolve(null);
   const existing = inflight.get(t);
   if (existing) return existing;
   const p = generateOnce(t)

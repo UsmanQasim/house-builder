@@ -11,7 +11,8 @@
 import { PlanTemplates } from './plan-templates.js';
 import type { Door, Floor, Layout, RawPlan, Rect, Room, RoomType, Side, Spec, Validation } from './types.js';
 
-const DOOR = 0.9, FRONT = 1.2, WIN = 1.4, EPS = 0.02;
+const DOOR = 0.9, FRONT = 1.2, WIN = 1.4, EPS = 0.02, OVERLAP_EPS = 1e-5;
+export const MIN_COVERAGE = 0.85;
 
 export const MIN: Record<string, { w: number; h: number }> = {
   living: { w: 3.6, h: 4.0 },
@@ -28,6 +29,72 @@ export const MIN: Record<string, { w: number; h: number }> = {
 export interface AIReport { layout: Layout | null; validation: Validation; coverage: number; }
 
 function clamp(v: number, lo: number, hi: number): number { return Math.max(lo, Math.min(hi, v)); }
+
+const PROMPT_NUMBERS: Record<string, number> = {
+  zero: 0, one: 1, single: 1, two: 2, double: 2, three: 3, four: 4, five: 5,
+  six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12
+};
+const PROMPT_COUNT = '(\\d{1,2}|zero|one|single|two|double|three|four|five|six|seven|eight|nine|ten|eleven|twelve)';
+
+function promptCount(text: string, forms: string, max: number): number | null {
+  const match = text.match(new RegExp('\\b' + PROMPT_COUNT + '[\\s-]*(?:' + forms + ')\\b', 'i'));
+  if (!match) return null;
+  const parsed = /^\d+$/.test(match[1]) ? Number(match[1]) : PROMPT_NUMBERS[match[1].toLowerCase()];
+  return Number.isFinite(parsed) ? clamp(parsed, 0, max) : null;
+}
+
+/** A deterministic, deliberately conservative prompt interpreter for offline
+ * mode. It only applies explicit counts/styles and named spaces; all other
+ * prose remains design context for an AI provider when one is available. */
+export function inferSpecFromPrompt(input: Spec): Spec {
+  const text = String(input.prompt || '').trim().toLowerCase();
+  const customRooms = (input.customRooms || []).map(room => ({ ...room }));
+  const next: Spec = { ...input, customRooms };
+  if (!text) return next;
+
+  const core: Array<[keyof Pick<Spec, 'bedrooms' | 'bathrooms' | 'kitchens' | 'living' | 'floors'>, string, number]> = [
+    ['bedrooms', 'beds?|bedrooms?', 12],
+    ['bathrooms', 'baths?|bathrooms?', 8],
+    ['kitchens', 'kitchens?', 4],
+    ['living', 'living\\s+(?:rooms?|spaces?)', 4],
+    ['floors', '(?:storeys?|stories|story|floors?|levels?)', 4]
+  ];
+  core.forEach(([key, forms, max]) => {
+    const value = promptCount(text, forms, max);
+    if (value != null && (key !== 'floors' || value > 0)) (next[key] as number) = value;
+  });
+
+  if (/\b(?:no|without)\s+(?:a\s+)?garage\b/.test(text)) next.garage = false;
+  else if (/\b(?:garage|carport)\b/.test(text)) next.garage = true;
+  if (/\b(?:no|without)\s+(?:a\s+)?(?:dedicated\s+)?dining(?:\s+room)?\b/.test(text)) next.dining = false;
+  else if (/\b(?:dining\s+room|dedicated\s+dining)\b/.test(text)) next.dining = true;
+
+  if (/\bscandinavian\b/.test(text)) next.style = 'scandinavian';
+  else if (/\bindustrial\b/.test(text)) next.style = 'industrial';
+  else if (/\bminimal(?:ist)?\b/.test(text)) next.style = 'minimalist';
+  else if (/\b(?:traditional|classic)\b/.test(text)) next.style = 'traditional';
+  else if (/\b(?:modern|contemporary)\b/.test(text)) next.style = 'modern';
+
+  const extras = [
+    { name: 'Home Office', forms: 'home\\s+offices?|offices?|stud(?:y|ies)', aliases: /\b(?:home\s+office|office|study)\b/, minW: 2.4, minH: 2.6 },
+    { name: 'Laundry', forms: 'laundr(?:y|ies)|laundry\\s+rooms?', aliases: /\blaundry\b/, minW: 1.8, minH: 2.0 },
+    { name: 'Pantry', forms: 'pantr(?:y|ies)|walk-in\\s+pantr(?:y|ies)', aliases: /\bpantry\b/, minW: 1.6, minH: 1.8 },
+    { name: 'Utility Room', forms: 'utility\\s+rooms?', aliases: /\butility\b/, minW: 1.8, minH: 2.0 },
+    { name: 'Prayer Room', forms: 'prayer\\s+rooms?|musallas?', aliases: /\b(?:prayer|musalla)\b/, minW: 2.4, minH: 2.8 },
+    { name: 'Gym', forms: 'gyms?|fitness\\s+rooms?', aliases: /\b(?:gym|fitness)\b/, minW: 2.8, minH: 3.0 },
+    { name: 'Media Room', forms: 'media\\s+rooms?|home\\s+theaters?|cinemas?', aliases: /\b(?:media|theater|cinema)\b/, minW: 3.0, minH: 3.2 },
+    { name: 'Library', forms: 'librar(?:y|ies)', aliases: /\blibrary\b/, minW: 2.6, minH: 2.8 },
+    { name: 'Mudroom', forms: 'mudrooms?', aliases: /\bmudroom\b/, minW: 1.8, minH: 2.0 },
+    { name: 'Workshop', forms: 'workshops?', aliases: /\bworkshop\b/, minW: 2.8, minH: 3.0 }
+  ];
+  extras.forEach(extra => {
+    const mentioned = new RegExp('\\b(?:' + extra.forms + ')\\b', 'i').test(text);
+    if (!mentioned || customRooms.some(room => extra.aliases.test(String(room.name).toLowerCase()))) return;
+    const count = promptCount(text, extra.forms, 4) || 1;
+    customRooms.push({ name: extra.name, count, minW: extra.minW, minH: extra.minH });
+  });
+  return next;
+}
 
 function sizedFootprint(c: Spec) {
   const margin = clamp(Math.min(c.plotW, c.plotD) * 0.05, 0.4, 1.0);
@@ -310,6 +377,10 @@ export function buildFromTemplate(c: Spec, templateId: string): Layout | null {
     corridorX, CW, floors, partitions: true,
     planSource: 'template', templateId, planConcept: tpl.concept || ''
   };
+  // Legacy templates historically omit the terminal landing. Keep this
+  // compatibility repair local to the template adapter; untrusted AI plans
+  // must prove their own stair alignment.
+  alignStairs(layout);
   repair(layout, c);
   return layout;
 }
@@ -317,7 +388,8 @@ export function buildFromTemplate(c: Spec, templateId: string): Layout | null {
 /* ----------------------------- validity engine ----------------------------- */
 
 function overlaps(a: Room, b: Room): boolean {
-  return a.x < b.x + b.w - EPS && a.x + a.w > b.x + EPS && a.y < b.y + b.h - EPS && a.y + a.h > b.y + EPS;
+  return a.x < b.x + b.w - OVERLAP_EPS && a.x + a.w > b.x + OVERLAP_EPS &&
+    a.y < b.y + b.h - OVERLAP_EPS && a.y + a.h > b.y + OVERLAP_EPS;
 }
 interface Span { side: Side; from: number; to: number; }
 function sharedSpan(A: Room, B: Room): Span | null {
@@ -352,12 +424,16 @@ function reachable(floor: Floor, foot: Rect, isGround: boolean): { room: Room; o
   const seen = new Array<boolean>(rooms.length).fill(false);
   const queue: number[] = [];
   rooms.forEach((r, i) => {
-    if (r.type === 'corridor') { seen[i] = true; queue.push(i); }
     if (isGround && floor.entrance &&
         floor.entrance.x >= r.x - 0.1 && floor.entrance.x <= r.x + r.w + 0.1 &&
         Math.abs(r.y + r.h - (foot.y + foot.h)) < 0.1) { if (!seen[i]) { seen[i] = true; queue.push(i); } }
+    if (!isGround && floor.stairs && r.type === 'corridor') {
+      const sx = floor.stairs.x + floor.stairs.w / 2, sy = floor.stairs.y + floor.stairs.h / 2;
+      if (sx >= r.x - EPS && sx <= r.x + r.w + EPS && sy >= r.y - EPS && sy <= r.y + r.h + EPS) {
+        if (!seen[i]) { seen[i] = true; queue.push(i); }
+      }
+    }
   });
-  if (!queue.length && rooms.length) { seen[0] = true; queue.push(0); }
   while (queue.length) {
     const i = queue.shift()!;
     for (let j = 0; j < rooms.length; j++) {
@@ -405,7 +481,6 @@ function fixOverlaps(floor: Floor): void {
   for (let a = 0; a < rooms.length; a++) {
     for (let b = a + 1; b < rooms.length; b++) {
       const A = rooms[a], B = rooms[b];
-      if (A.name === 'Hall' || B.name === 'Hall') continue;
       if (!overlaps(A, B)) continue;
       const S = A.area <= B.area ? A : B, L2 = S === A ? B : A;
       const oxr = (L2.x + L2.w) - S.x, oxl = (S.x + S.w) - L2.x;
@@ -434,14 +509,36 @@ function alignStairs(layout: Layout): void {
 export function repair(layout: Layout, c: Spec): Layout {
   const foot = layout.foot;
   layout.floors.forEach((fl, i) => {
-    clampRooms(fl, foot);
-    fixOverlaps(fl);
-    clampRooms(fl, foot);
+    fl.rooms.forEach(r => { r.area = r.w * r.h; });
     applyWindows(fl.rooms, foot.x, foot.y, foot.w, foot.h);
     ensureDoors(fl, foot, i === 0);
   });
-  alignStairs(layout);
   return layout;
+}
+
+function unionAreaInFoot(rooms: Room[], foot: Rect): number {
+  const rects = rooms.map(r => ({
+    x1: Math.max(foot.x, r.x), y1: Math.max(foot.y, r.y),
+    x2: Math.min(foot.x + foot.w, r.x + r.w), y2: Math.min(foot.y + foot.h, r.y + r.h)
+  })).filter(r => Number.isFinite(r.x1 + r.y1 + r.x2 + r.y2) && r.x2 - r.x1 > OVERLAP_EPS && r.y2 - r.y1 > OVERLAP_EPS);
+  if (!rects.length) return 0;
+  const xs = Array.from(new Set(rects.flatMap(r => [r.x1, r.x2]))).sort((a, b) => a - b);
+  let area = 0;
+  for (let i = 0; i + 1 < xs.length; i++) {
+    const x1 = xs[i], x2 = xs[i + 1], dx = x2 - x1;
+    if (dx <= OVERLAP_EPS) continue;
+    const ys = rects.filter(r => r.x1 < x2 - OVERLAP_EPS && r.x2 > x1 + OVERLAP_EPS)
+      .map(r => [r.y1, r.y2] as [number, number]).sort((a, b) => a[0] - b[0]);
+    let length = 0, lo = 0, hi = 0, active = false;
+    ys.forEach(([a, b]) => {
+      if (!active) { lo = a; hi = b; active = true; }
+      else if (a <= hi + OVERLAP_EPS) hi = Math.max(hi, b);
+      else { length += hi - lo; lo = a; hi = b; }
+    });
+    if (active) length += hi - lo;
+    area += dx * length;
+  }
+  return area;
 }
 
 export function coverage(layout: Layout): number {
@@ -449,8 +546,7 @@ export function coverage(layout: Layout): number {
   if (!fa) return 0;
   let worst = 1;
   layout.floors.forEach(fl => {
-    const sum = fl.rooms.reduce((s, r) => s + r.w * r.h, 0);
-    worst = Math.min(worst, Math.min(1, sum / fa));
+    worst = Math.min(worst, Math.min(1, unionAreaInFoot(fl.rooms, foot) / fa));
   });
   return worst;
 }
@@ -459,28 +555,68 @@ export function validateLayout(layout: Layout | null, c: { floors: number } & Pa
   if (!layout || !layout.floors || layout.floors.length !== c.floors) return { ok: false, score: 0, issues: ['floor count'] };
   const issues: string[] = [], f = layout.foot;
   let score = 100;
-  if (c.strictCounts) {
-    const all = layout.floors.flatMap(fl => fl.rooms);
-    const count = (t: string) => all.filter(r => r.type === t).length;
-    if (typeof c.bedrooms === 'number' && count('bedroom') !== c.bedrooms) { issues.push('bedroom count ' + count('bedroom') + '/' + c.bedrooms); score -= 30; }
-    if (typeof c.bathrooms === 'number' && count('bathroom') !== c.bathrooms) { issues.push('bathroom count ' + count('bathroom') + '/' + c.bathrooms); score -= 20; }
-    if (typeof c.kitchens === 'number' && c.kitchens > 0 && count('kitchen') < 1) { issues.push('missing kitchen'); score -= 25; }
-    if (typeof c.living === 'number' && c.living > 0 && count('living') < 1) { issues.push('missing living room'); score -= 25; }
-    if (c.garage === true && count('garage') < 1) { issues.push('missing garage'); score -= 15; }
+  const all = layout.floors.flatMap(fl => fl.rooms);
+  const count = (t: string) => all.filter(r => r.type === t).length;
+  const exact = (type: string, expected: number | undefined, penalty: number) => {
+    if (typeof expected !== 'number') return;
+    const actual = count(type);
+    if (actual !== expected) { issues.push(type + ' count ' + actual + '/' + expected); score -= penalty; }
+  };
+  exact('bedroom', c.bedrooms, 30);
+  exact('bathroom', c.bathrooms, 24);
+  exact('kitchen', c.kitchens, 24);
+  exact('living', c.living, 24);
+  if (typeof c.dining === 'boolean') exact('dining', c.dining ? 1 : 0, 15);
+  if (typeof c.garage === 'boolean') exact('garage', c.garage ? 1 : 0, 15);
+  if (Array.isArray(c.customRooms)) {
+    const requested = new Map<string, number>();
+    c.customRooms.forEach(req => {
+      const name = String(req && req.name || '').trim().toLowerCase();
+      if (name) requested.set(name, (requested.get(name) || 0) + Math.max(1, Math.min(12, Math.round(req.count || 1))));
+    });
+    exact('room', Array.from(requested.values()).reduce((s, n) => s + n, 0), 18);
+    const generic = all.filter(r => r.type === 'room');
+    requested.forEach((expected, base) => {
+      const actual = generic.filter(r => { const n = r.name.trim().toLowerCase(); return n === base || n.startsWith(base + ' '); }).length;
+      if (actual !== expected) { issues.push('custom room "' + base + '" count ' + actual + '/' + expected); score -= 12; }
+    });
   }
   layout.floors.forEach((fl, i) => {
     for (let a = 0; a < fl.rooms.length; a++) {
       for (let b = a + 1; b < fl.rooms.length; b++) {
-        if (fl.rooms[a].name === 'Hall' || fl.rooms[b].name === 'Hall') continue;
         if (overlaps(fl.rooms[a], fl.rooms[b])) { issues.push('overlap F' + (i + 1) + ': ' + fl.rooms[a].name + '/' + fl.rooms[b].name); score -= 25; }
       }
       const r = fl.rooms[a];
+      if (![r.x, r.y, r.w, r.h].every(Number.isFinite) || r.w <= 0 || r.h <= 0) {
+        issues.push('invalid geometry ' + r.name); score -= 25; continue;
+      }
       if (r.x < f.x - EPS || r.y < f.y - EPS || r.x + r.w > f.x + f.w + EPS || r.y + r.h > f.y + f.h + EPS) {
         issues.push('out of bounds ' + r.name); score -= 15;
       }
-      const lim = MIN[r.type] || MIN.room;
-      if (r.type !== 'corridor' && (Math.min(r.w, r.h) < Math.min(lim.w, lim.h) * 0.6)) {
+      let lim = r.type === 'bedroom' && /master/i.test(r.name) ? MIN.master : (MIN[r.type] || MIN.room);
+      if (r.type === 'room' && Array.isArray(c.customRooms)) {
+        const rn = r.name.trim().toLowerCase();
+        const req = c.customRooms.find(q => { const base = String(q && q.name || '').trim().toLowerCase(); return base && (rn === base || rn.startsWith(base + ' ')); });
+        if (req) {
+          const base = String(req.name).toLowerCase();
+          const inferred = /office|study/.test(base) ? { w: 2.6, h: 2.8 }
+            : /laundry|utility/.test(base) ? { w: 1.8, h: 2.0 }
+            : /pantry|closet|store/.test(base) ? { w: 1.5, h: 1.8 }
+            : /ensuite|powder|wc/.test(base) ? MIN.bathroom : MIN.room;
+          lim = { w: clamp(Number(req.minW) || inferred.w, 1.2, 12), h: clamp(Number(req.minH) || inferred.h, 1.2, 12) };
+        }
+      }
+      const actualShort = Math.min(r.w, r.h), actualLong = Math.max(r.w, r.h);
+      const minShort = Math.min(lim.w, lim.h), minLong = Math.max(lim.w, lim.h);
+      if (actualShort + EPS < minShort || actualLong + EPS < minLong) {
         issues.push('too small ' + r.name); score -= 5;
+      }
+      if (r.door) {
+        const along0 = r.door.side === 'left' || r.door.side === 'right' ? r.y : r.x;
+        const along1 = r.door.side === 'left' || r.door.side === 'right' ? r.y + r.h : r.x + r.w;
+        if (!Number.isFinite(r.door.pos) || r.door.width < 0.7 || r.door.pos - r.door.width / 2 < along0 - EPS || r.door.pos + r.door.width / 2 > along1 + EPS) {
+          issues.push('invalid door ' + r.name); score -= 8;
+        }
       }
       r.windows.forEach(wdw => {
         const onEdge =
@@ -493,32 +629,425 @@ export function validateLayout(layout: Layout | null, c: { floors: number } & Pa
     }
     const unreachable = reachable(fl, f, i === 0).filter(s => !s.ok);
     unreachable.forEach(u => { issues.push('unreachable F' + (i + 1) + ': ' + u.room.name); score -= 20; });
+    const fc = unionAreaInFoot(fl.rooms, f) / Math.max(OVERLAP_EPS, f.w * f.h);
+    if (fc + OVERLAP_EPS < MIN_COVERAGE) { issues.push('coverage F' + (i + 1) + ': ' + Math.round(fc * 100) + '%/' + Math.round(MIN_COVERAGE * 100) + '%'); score -= 25; }
+    if (i === 0) {
+      if (!fl.entrance || Math.abs(fl.entrance.y - (f.y + f.h)) > 0.15 || fl.entrance.x < f.x || fl.entrance.x > f.x + f.w) {
+        issues.push('invalid entrance'); score -= 20;
+      }
+    }
+    if (layout.floors.length > 1) {
+      const st = fl.stairs;
+      if (!st) { issues.push('missing stairs F' + (i + 1)); score -= 15; }
+      else {
+        const inside = st.x >= f.x - EPS && st.y >= f.y - EPS && st.x + st.w <= f.x + f.w + EPS && st.y + st.h <= f.y + f.h + EPS;
+        const inCirculation = fl.rooms.some(r => r.type === 'corridor' && st.x >= r.x - EPS && st.y >= r.y - EPS && st.x + st.w <= r.x + r.w + EPS && st.y + st.h <= r.y + r.h + EPS);
+        if (!inside || st.w < 0.8 || st.h < 1.8) { issues.push('invalid stairs F' + (i + 1)); score -= 15; }
+        if (!inCirculation) { issues.push('stairs outside circulation F' + (i + 1)); score -= 15; }
+      }
+    }
   });
   for (let i = 0; i + 1 < layout.floors.length; i++) {
     const a = layout.floors[i].stairs, b = layout.floors[i + 1].stairs;
-    if (!a || !b) { issues.push('missing stairs F' + (i + 1)); score -= 15; }
-    else if (Math.abs(a.x - b.x) > 0.15 || Math.abs(a.y - b.y) > 0.15) { issues.push('stairs misaligned F' + (i + 1) + '/F' + (i + 2)); score -= 15; }
+    if (a && b && (Math.abs(a.x - b.x) > 0.15 || Math.abs(a.y - b.y) > 0.15 || Math.abs(a.w - b.w) > 0.15 || Math.abs(a.h - b.h) > 0.15)) {
+      issues.push('stairs misaligned F' + (i + 1) + '/F' + (i + 2)); score -= 15;
+    }
   }
-  return { ok: issues.length === 0 && score >= 60, score: Math.max(0, score), issues };
+  return { ok: issues.length === 0, score: Math.max(0, score), issues };
 }
 
-export function computeLayout(c: Spec): Layout {
-  const tid = PlanTemplates.pickTemplate(c);
-  const built = buildFromTemplate(c, tid);
-  if (built) return built;
+/* ---------------------- seeded procedural candidate engine ---------------------- */
 
+interface ProgramRoom {
+  type: RoomType;
+  name: string;
+  index: number;
+  minW: number;
+  minH: number;
+  targetArea: number;
+  preferredFloor?: number;
+  customBase?: string;
+}
+interface BinDef { capacity: number; cross: number; }
+interface Candidate { layout: Layout; validation: Validation; quality: number; }
+type Rng = () => number;
+
+function seededRng(seed: number): Rng {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function mixSeed(seed: number, n: number): number {
+  let x = (seed ^ Math.imul(n + 1, 0x9E3779B1)) >>> 0;
+  x ^= x >>> 16; x = Math.imul(x, 0x7FEB352D); x ^= x >>> 15; x = Math.imul(x, 0x846CA68B); x ^= x >>> 16;
+  return x >>> 0;
+}
+function shuffled<T>(src: T[], rng: Rng): T[] {
+  const out = src.slice();
+  for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [out[i], out[j]] = [out[j], out[i]]; }
+  return out;
+}
+function countOf(v: number): number { return Math.max(0, Math.round(Number.isFinite(v) ? v : 0)); }
+
+function makeProgramRoom(type: RoomType, name: string, index: number): ProgramRoom {
+  const lim = type === 'bedroom' && index === 0 ? MIN.master : (MIN[type] || MIN.room);
+  const factor: Record<string, number> = { living: 1.35, bedroom: index === 0 ? 1.25 : 1.12, kitchen: 1.2, bathroom: 1.1, dining: 1.18, garage: 1.08, room: 1.1 };
+  return { type, name, index, minW: lim.w, minH: lim.h, targetArea: lim.w * lim.h * (factor[type] || 1.1) };
+}
+function roomProgram(c: Spec): ProgramRoom[] {
+  const out: ProgramRoom[] = [];
+  const living = countOf(c.living), kitchens = countOf(c.kitchens), beds = countOf(c.bedrooms), baths = countOf(c.bathrooms);
+  for (let i = 0; i < living; i++) out.push(makeProgramRoom('living', living === 1 ? 'Living Room' : 'Living ' + (i + 1), i));
+  for (let i = 0; i < kitchens; i++) out.push(makeProgramRoom('kitchen', kitchens === 1 ? 'Kitchen' : 'Kitchen ' + (i + 1), i));
+  if (c.dining) out.push(makeProgramRoom('dining', 'Dining', 0));
+  if (c.garage) out.push(makeProgramRoom('garage', 'Garage', 0));
+  for (let i = 0; i < beds; i++) out.push(makeProgramRoom('bedroom', i === 0 ? 'Master Bedroom' : 'Bedroom ' + (i + 1), i));
+  for (let i = 0; i < baths; i++) out.push(makeProgramRoom('bathroom', baths === 1 ? 'Bathroom' : 'Bathroom ' + (i + 1), i));
+  (c.customRooms || []).slice(0, 20).forEach(req => {
+    const base = String(req && req.name || '').trim().slice(0, 60);
+    if (!base) return;
+    const n = Math.max(1, Math.min(12, Math.round(req.count || 1)));
+    const lower = base.toLowerCase();
+    const inferred = /office|study/.test(lower) ? { w: 2.6, h: 2.8 }
+      : /laundry|utility/.test(lower) ? { w: 1.8, h: 2.0 }
+      : /pantry|closet|store/.test(lower) ? { w: 1.5, h: 1.8 }
+      : /ensuite|powder|wc/.test(lower) ? MIN.bathroom : MIN.room;
+    const minW = clamp(Number(req.minW) || inferred.w, 1.2, 12), minH = clamp(Number(req.minH) || inferred.h, 1.2, 12);
+    for (let i = 0; i < n; i++) out.push({
+      type: 'room', name: n === 1 ? base : base + ' ' + (i + 1), index: i,
+      minW, minH, targetArea: minW * minH * 1.15,
+      preferredFloor: Number.isFinite(req.preferredFloor) ? clamp(Math.round(req.preferredFloor!), 0, c.floors - 1) : undefined,
+      customBase: base
+    });
+  });
+  return out;
+}
+
+function assignmentRank(r: ProgramRoom): number {
+  if (r.type === 'garage') return 0;
+  if (r.type === 'living' || r.type === 'kitchen' || r.type === 'dining') return 1;
+  if (r.type === 'bedroom') return 2;
+  return 3;
+}
+function floorPreference(r: ProgramRoom, floor: number, floors: number, rngBias: number): number {
+  if (r.type === 'garage') return floor === 0 ? 0 : 1e6;
+  if (floors === 1) return 0;
+  if (r.type === 'dining') return floor === 0 ? 0 : 3.2;
+  if ((r.type === 'living' || r.type === 'kitchen') && r.index === 0) return floor === 0 ? 0 : 2.8;
+  if (r.type === 'bedroom') {
+    const preferred = 1 + ((r.index + Math.floor(rngBias * (floors - 1))) % (floors - 1));
+    return floor === preferred ? 0 : floor === 0 ? 2.0 : 0.65;
+  }
+  if (r.type === 'bathroom') {
+    if (r.index === 0) return floor === 0 ? 0.25 : 0.7;
+    const preferred = 1 + ((r.index - 1) % (floors - 1));
+    return floor === preferred ? 0 : floor === 0 ? 1.1 : 0.45;
+  }
+  if (r.type === 'room' && r.preferredFloor != null) return floor === r.preferredFloor ? 0 : 2.4 + Math.abs(floor - r.preferredFloor) * 0.3;
+  return floor * 0.15;
+}
+function assignProgramToFloors(program: ProgramRoom[], c: Spec, foot: Rect, rng: Rng): ProgramRoom[][] {
+  const buckets = Array.from({ length: c.floors }, () => [] as ProgramRoom[]);
+  const loads = new Array<number>(c.floors).fill(0);
+  const biases = new Map<ProgramRoom, number>(); program.forEach(r => biases.set(r, rng()));
+  const ordered = program.slice().sort((a, b) => assignmentRank(a) - assignmentRank(b) || b.targetArea - a.targetArea || (biases.get(a)! - biases.get(b)!));
+  const capacity = Math.max(1, foot.w * foot.h * 0.82);
+  ordered.forEach(r => {
+    let best = 0, bestCost = Infinity;
+    for (let f = 0; f < c.floors; f++) {
+      const pref = floorPreference(r, f, c.floors, biases.get(r)!);
+      const projected = (loads[f] + r.targetArea) / capacity;
+      const spread = buckets[f].length * 0.025;
+      const cost = pref + projected * projected * 2.2 + spread + rng() * 0.08;
+      if (cost < bestCost) { bestCost = cost; best = f; }
+    }
+    buckets[best].push(r); loads[best] += r.targetArea;
+  });
+  return buckets;
+}
+
+/** Required length along a partition when its other dimension is fixed. */
+function minAlong(r: ProgramRoom, cross: number): number | null {
+  const options: number[] = [];
+  if (cross + EPS >= r.minW) options.push(r.minH);
+  if (cross + EPS >= r.minH) options.push(r.minW);
+  return options.length ? Math.min(...options) : null;
+}
+function splitBins(rooms: ProgramRoom[], bins: [BinDef, BinDef], rng: Rng, force?: (r: ProgramRoom) => 0 | 1 | null): [ProgramRoom[], ProgramRoom[]] | null {
+  if (!rooms.length) return [[], []];
+  let best: [ProgramRoom[], ProgramRoom[]] | null = null, bestBalance = Infinity;
+  for (let attempt = 0; attempt < 16; attempt++) {
+    const used = [0, 0], placed: [ProgramRoom[], ProgramRoom[]] = [[], []];
+    const noise = new Map<ProgramRoom, number>(); rooms.forEach(r => noise.set(r, rng()));
+    const order = rooms.slice().sort((a, b) => {
+      const ao = [minAlong(a, bins[0].cross), minAlong(a, bins[1].cross)].filter(x => x != null).length;
+      const bo = [minAlong(b, bins[0].cross), minAlong(b, bins[1].cross)].filter(x => x != null).length;
+      const ar = Math.max(minAlong(a, bins[0].cross) || 0, minAlong(a, bins[1].cross) || 0);
+      const br = Math.max(minAlong(b, bins[0].cross) || 0, minAlong(b, bins[1].cross) || 0);
+      return ao - bo || br - ar || noise.get(a)! - noise.get(b)!;
+    });
+    let failed = false;
+    for (const room of order) {
+      const forced = force ? force(room) : null;
+      const opts: { bin: 0 | 1; need: number; cost: number }[] = [];
+      ([0, 1] as const).forEach(bin => {
+        if (forced != null && forced !== bin) return;
+        const need = minAlong(room, bins[bin].cross);
+        if (need == null || used[bin] + need > bins[bin].capacity + EPS) return;
+        const fill = (used[bin] + need) / bins[bin].capacity;
+        opts.push({ bin, need, cost: fill + rng() * (attempt ? 0.2 : 0.04) });
+      });
+      if (!opts.length) { failed = true; break; }
+      opts.sort((a, b) => a.cost - b.cost);
+      const pick = opts[0]; used[pick.bin] += pick.need; placed[pick.bin].push(room);
+    }
+    if (!failed) {
+      const balance = Math.abs(used[0] / bins[0].capacity - used[1] / bins[1].capacity) + rng() * 0.01;
+      if (balance < bestBalance) { bestBalance = balance; best = [placed[0].slice(), placed[1].slice()]; }
+    }
+  }
+  if (best) return best;
+
+  // Greedy balancing is fast and gives useful variety, but dense programmes
+  // occasionally require a non-obvious packing. Fall back to an exact,
+  // memoised two-bin search before declaring the geometry infeasible.
+  const tie = new Map<ProgramRoom, number>(); rooms.forEach(r => tie.set(r, rng()));
+  const exactOrder = rooms.slice().sort((a, b) => {
+    const a0 = minAlong(a, bins[0].cross), a1 = minAlong(a, bins[1].cross);
+    const b0 = minAlong(b, bins[0].cross), b1 = minAlong(b, bins[1].cross);
+    const ao = (a0 == null ? 0 : 1) + (a1 == null ? 0 : 1), bo = (b0 == null ? 0 : 1) + (b1 == null ? 0 : 1);
+    return ao - bo || Math.max(b0 || 0, b1 || 0) - Math.max(a0 || 0, a1 || 0) || tie.get(a)! - tie.get(b)!;
+  });
+  const exactPlaced: [ProgramRoom[], ProgramRoom[]] = [[], []], memo = new Set<string>();
+  const search = (at: number, used0: number, used1: number): boolean => {
+    if (at === exactOrder.length) return true;
+    const key = at + '|' + Math.round(used0 * 100) + '|' + Math.round(used1 * 100);
+    if (memo.has(key)) return false;
+    const room = exactOrder[at], forced = force ? force(room) : null;
+    const options: { bin: 0 | 1; need: number; score: number }[] = [];
+    ([0, 1] as const).forEach(bin => {
+      if (forced != null && forced !== bin) return;
+      const need = minAlong(room, bins[bin].cross), used = bin === 0 ? used0 : used1;
+      if (need != null && used + need <= bins[bin].capacity + EPS) options.push({ bin, need, score: (used + need) / bins[bin].capacity + rng() * 0.08 });
+    });
+    options.sort((a, b) => a.score - b.score);
+    for (const option of options) {
+      exactPlaced[option.bin].push(room);
+      if (search(at + 1, used0 + (option.bin === 0 ? option.need : 0), used1 + (option.bin === 1 ? option.need : 0))) return true;
+      exactPlaced[option.bin].pop();
+    }
+    memo.add(key); return false;
+  };
+  return search(0, 0, 0) ? [exactPlaced[0].slice(), exactPlaced[1].slice()] : null;
+}
+function allocatedSegments(rooms: ProgramRoom[], cross: number, total: number, rng: Rng, garageLast: boolean): { room: ProgramRoom; length: number }[] | null {
+  if (!rooms.length) return [];
+  let ordered = shuffled(rooms, rng);
+  if (garageLast) ordered = ordered.filter(r => r.type !== 'garage').concat(ordered.filter(r => r.type === 'garage'));
+  // Frequently keep kitchen and dining contiguous without making every seed identical.
+  const ki = ordered.findIndex(r => r.type === 'kitchen'), di = ordered.findIndex(r => r.type === 'dining');
+  if (ki >= 0 && di >= 0 && Math.abs(ki - di) > 1 && rng() > 0.25) {
+    const dining = ordered.splice(di, 1)[0]; const kitchenAt = ordered.findIndex(r => r.type === 'kitchen'); ordered.splice(kitchenAt + 1, 0, dining);
+  }
+  const needs = ordered.map(r => minAlong(r, cross));
+  if (needs.some(n => n == null)) return null;
+  const base = (needs as number[]).reduce((s, n) => s + n, 0);
+  if (base > total + EPS) return null;
+  const extra = Math.max(0, total - base);
+  const weights = ordered.map((r, i) => Math.max(0.15, r.targetArea / cross - (needs[i] as number)) + 0.12 + rng() * 0.3);
+  const weightSum = weights.reduce((s, n) => s + n, 0);
+  const out = ordered.map((room, i) => ({ room, length: (needs[i] as number) + extra * weights[i] / weightSum }));
+  // Absorb floating-point drift in the final segment so the footprint tiles exactly.
+  out[out.length - 1].length += total - out.reduce((s, x) => s + x.length, 0);
+  return out;
+}
+
+function addProgramRoom(floor: Floor, p: ProgramRoom, x: number, y: number, w: number, h: number, doorSide: Side): void {
+  const room = mk(p.type, p.name, x, y, w, h);
+  const along = doorSide === 'left' || doorSide === 'right' ? y + h / 2 : x + w / 2;
+  setDoor(room, doorSide, along, Math.min(DOOR, (doorSide === 'left' || doorSide === 'right' ? h : w) - 0.3));
+  floor.rooms.push(room);
+}
+function addOpenCorridor(floor: Floor, name: string, x: number, y: number, w: number, h: number, side: Side): Room {
+  const hall = mk('corridor', name, x, y, w, h);
+  setDoor(hall, side, side === 'left' || side === 'right' ? y + h / 2 : x + w / 2, Math.min(1.2, (side === 'left' || side === 'right' ? h : w) - 0.2));
+  floor.rooms.push(hall);
+  return hall;
+}
+
+function verticalFloor(fi: number, assigned: ProgramRoom[], c: Spec, foot: Rect, cw: number, ratio: number, rng: Rng): Floor | null {
+  const leftW = (foot.w - cw) * ratio, rightW = foot.w - cw - leftW;
+  if (leftW < MIN.corridor.w || rightW < MIN.corridor.w) return null;
+  const split = splitBins(assigned, [{ capacity: foot.h, cross: leftW }, { capacity: foot.h, cross: rightW }], rng);
+  if (!split) return null;
+  const floor: Floor = { index: fi, rooms: [], corridor: null, entrance: null, stairs: null };
+  const hallX = foot.x + leftW;
+  const main = mk('corridor', fi ? 'Landing' : 'Main Hall', hallX, foot.y, cw, foot.h); floor.rooms.push(main);
+  floor.corridor = { x: hallX, y: foot.y, w: cw, h: foot.h };
+  const left = allocatedSegments(split[0], leftW, foot.h, rng, true), right = allocatedSegments(split[1], rightW, foot.h, rng, true);
+  if (!left || !right) return null;
+  if (!left.length) addOpenCorridor(floor, 'West Gallery', foot.x, foot.y, leftW, foot.h, 'right');
+  else { let y = foot.y; left.forEach(s => { addProgramRoom(floor, s.room, foot.x, y, leftW, s.length, 'right'); y += s.length; }); }
+  if (!right.length) addOpenCorridor(floor, 'East Gallery', hallX + cw, foot.y, rightW, foot.h, 'left');
+  else { let y = foot.y; right.forEach(s => { addProgramRoom(floor, s.room, hallX + cw, y, rightW, s.length, 'left'); y += s.length; }); }
+  if (fi === 0) floor.entrance = { x: hallX + cw / 2, y: foot.y + foot.h, width: FRONT };
+  if (c.floors > 1) floor.stairs = { x: hallX + 0.1, y: foot.y + 0.25, w: cw - 0.2, h: Math.min(2.7, foot.h - 0.5) };
+  applyWindows(floor.rooms, foot.x, foot.y, foot.w, foot.h);
+  return floor;
+}
+
+function horizontalFloor(fi: number, assigned: ProgramRoom[], c: Spec, foot: Rect, cw: number, ratio: number, entryLeft: boolean, entryW: number, rng: Rng): Floor | null {
+  const topH = (foot.h - cw) * ratio, bottomH = foot.h - cw - topH;
+  if (topH < MIN.corridor.w || bottomH < MIN.corridor.w || entryW >= foot.w - MIN.corridor.w) return null;
+  if (c.floors > 1 && bottomH < 2.1) return null;
+  const split = splitBins(assigned, [{ capacity: foot.w, cross: topH }, { capacity: foot.w - entryW, cross: bottomH }], rng, r => r.type === 'garage' ? 1 : null);
+  if (!split) return null;
+  const floor: Floor = { index: fi, rooms: [], corridor: null, entrance: null, stairs: null };
+  const hallY = foot.y + topH, entryX = entryLeft ? foot.x : foot.x + foot.w - entryW;
+  const main = mk('corridor', fi ? 'Landing' : 'Main Hall', foot.x, hallY, foot.w, cw); floor.rooms.push(main);
+  floor.corridor = { x: foot.x, y: hallY, w: foot.w, h: cw };
+  addOpenCorridor(floor, fi ? 'Stair Hall' : 'Entry Hall', entryX, hallY + cw, entryW, bottomH, 'top');
+  const top = allocatedSegments(split[0], topH, foot.w, rng, false);
+  const bottom = allocatedSegments(split[1], bottomH, foot.w - entryW, rng, false);
+  if (!top || !bottom) return null;
+  if (!top.length) addOpenCorridor(floor, 'North Gallery', foot.x, foot.y, foot.w, topH, 'bottom');
+  else { let x = foot.x; top.forEach(s => { addProgramRoom(floor, s.room, x, foot.y, s.length, topH, 'bottom'); x += s.length; }); }
+  const bottomX = entryLeft ? foot.x + entryW : foot.x;
+  if (!bottom.length) addOpenCorridor(floor, 'South Gallery', bottomX, hallY + cw, foot.w - entryW, bottomH, 'top');
+  else { let x = bottomX; bottom.forEach(s => { addProgramRoom(floor, s.room, x, hallY + cw, s.length, bottomH, 'top'); x += s.length; }); }
+  if (fi === 0) floor.entrance = { x: entryX + entryW / 2, y: foot.y + foot.h, width: Math.min(FRONT, entryW - 0.1) };
+  if (c.floors > 1) floor.stairs = { x: entryX + 0.1, y: hallY + cw + 0.12, w: entryW - 0.2, h: bottomH - 0.24 };
+  applyWindows(floor.rooms, foot.x, foot.y, foot.w, foot.h);
+  return floor;
+}
+
+function candidateQuality(layout: Layout, program: ProgramRoom[], rng: Rng): number {
+  const fa = layout.foot.w * layout.foot.h * layout.floors.length;
+  const corridors = layout.floors.flatMap(f => f.rooms).filter(r => r.type === 'corridor').reduce((s, r) => s + r.area, 0);
+  let score = coverage(layout) * 72 - (corridors / Math.max(1, fa)) * 18;
+  const habitable = layout.floors.flatMap(f => f.rooms).filter(r => ['living', 'bedroom', 'kitchen', 'dining'].includes(r.type));
+  score += habitable.filter(r => r.windows.length > 0).length / Math.max(1, habitable.length) * 12;
+  layout.floors.forEach(fl => {
+    const kitchen = fl.rooms.find(r => r.type === 'kitchen'), dining = fl.rooms.find(r => r.type === 'dining');
+    if (kitchen && dining && sharedSpan(kitchen, dining)) score += 6;
+    const garage = fl.rooms.find(r => r.type === 'garage');
+    if (garage && Math.abs(garage.y + garage.h - (layout.foot.y + layout.foot.h)) < EPS * 4) score += 3;
+  });
+  const actual = new Map<string, number>(); layout.floors.flatMap(f => f.rooms).forEach(r => actual.set(r.name, r.area));
+  program.forEach(r => { const a = actual.get(r.name) || 0; score -= Math.min(3, Math.abs(a - r.targetArea) / Math.max(1, r.targetArea)); });
+  return clamp(score + rng() * 2, 0, 100);
+}
+
+function makeCandidate(c: Spec, foot: Rect, seed: number, index: number): Candidate | null {
+  const rng = seededRng(mixSeed(seed, index));
+  const program = roomProgram(c), assigned = assignProgramToFloors(program, c, foot, rng);
+  const cw = 1.2 + rng() * 0.25;
+  const vertical = ((index + (seed & 1)) % 2) === 0;
+  const floors: Floor[] = [];
+  let corridorX = foot.x + foot.w / 2, corridorW = cw;
+  if (vertical) {
+    const variants = [0.24, 0.31, 0.39, 0.47, 0.53, 0.61, 0.69, 0.76];
+    const ratio = clamp(variants[(index + (seed % variants.length)) % variants.length] + (rng() - 0.5) * 0.035, 0.2, 0.8);
+    for (let fi = 0; fi < c.floors; fi++) { const fl = verticalFloor(fi, assigned[fi], c, foot, cw, ratio, rng); if (!fl) return null; floors.push(fl); }
+    corridorX = floors[0].corridor!.x; corridorW = floors[0].corridor!.w;
+  } else {
+    const variants = [0.34, 0.41, 0.48, 0.55, 0.62, 0.68];
+    const ratio = clamp(variants[(index + (seed % variants.length)) % variants.length] + (rng() - 0.5) * 0.035, 0.28, 0.72);
+    const entryW = clamp(1.22 + rng() * 0.28, 1.2, Math.min(1.55, foot.w * 0.25));
+    const entryLeft = ((index + ((seed >>> 3) & 1)) % 2) === 0;
+    for (let fi = 0; fi < c.floors; fi++) { const fl = horizontalFloor(fi, assigned[fi], c, foot, cw, ratio, entryLeft, entryW, rng); if (!fl) return null; floors.push(fl); }
+    const stairHall = floors[0].rooms.find(r => r.name === 'Entry Hall'); corridorX = stairHall ? stairHall.x : foot.x; corridorW = entryW;
+  }
+  const layout: Layout = {
+    plotW: c.plotW, plotD: c.plotD, foot, corridorX, CW: corridorW, floors, partitions: true,
+    planSource: 'procedural', planSeed: seed, planCandidates: 0,
+    planConcept: vertical ? 'Seeded split-hall plan with direct room circulation.' : 'Seeded cross-hall plan with a dedicated entry and stair core.'
+  };
+  const validation = validateLayout(layout, c);
+  const quality = candidateQuality(layout, program, rng);
+  return { layout, validation, quality };
+}
+
+function legacyProcedural(c: Spec): Layout {
   const { fw, fh, fx, fy } = sizedFootprint(c);
   const floors = [layoutGround(c, fx, fy, fw, fh)];
   let corridorX = fx + (fw - 1.25) / 2, CW = 1.25;
-  for (let fi = 1; fi < c.floors; fi++) {
-    const up = layoutUpper(c, fx, fy, fw, fh, fi);
-    floors.push(up.floor);
-    corridorX = up.corridorX;
-    CW = up.CW;
+  for (let fi = 1; fi < c.floors; fi++) { const up = layoutUpper(c, fx, fy, fw, fh, fi); floors.push(up.floor); corridorX = up.corridorX; CW = up.CW; }
+  const layout: Layout = { plotW: c.plotW, plotD: c.plotD, foot: { x: fx, y: fy, w: fw, h: fh }, corridorX, CW, floors, partitions: true, planSource: 'legacy-procedural' };
+  alignStairs(layout); repair(layout, c); return layout;
+}
+
+/** Last-ditch count-preserving subdivision for genuinely over-constrained
+ * briefs. It deliberately keeps every requested room and full connectivity;
+ * the strict validator can still flag rooms whose minimum size is physically
+ * impossible on the supplied footprint. */
+function relaxedCountLayout(c: Spec, foot: Rect, seed: number): Layout {
+  const rng = seededRng(mixSeed(seed, 0xFFFF)), assigned = assignProgramToFloors(roomProgram(c), c, foot, rng);
+  const cw = 1.2, leftW = (foot.w - cw) / 2, hallX = foot.x + leftW, floors: Floor[] = [];
+  for (let fi = 0; fi < c.floors; fi++) {
+    const floor: Floor = { index: fi, rooms: [], corridor: { x: hallX, y: foot.y, w: cw, h: foot.h }, entrance: null, stairs: null };
+    floor.rooms.push(mk('corridor', fi ? 'Landing' : 'Main Hall', hallX, foot.y, cw, foot.h));
+    const sides: [ProgramRoom[], ProgramRoom[]] = [[], []];
+    shuffled(assigned[fi], rng).sort((a, b) => b.targetArea - a.targetArea).forEach((r, i) => sides[i % 2].push(r));
+    sides.forEach(side => { const gi = side.findIndex(r => r.type === 'garage'); if (gi >= 0) side.push(side.splice(gi, 1)[0]); });
+    if (!sides[0].length) addOpenCorridor(floor, 'West Gallery', foot.x, foot.y, leftW, foot.h, 'right');
+    else {
+      let y = foot.y; sides[0].forEach((r, i) => { const h = i === sides[0].length - 1 ? foot.y + foot.h - y : foot.h / sides[0].length; addProgramRoom(floor, r, foot.x, y, leftW, h, 'right'); y += h; });
+    }
+    const rightW = foot.w - cw - leftW;
+    if (!sides[1].length) addOpenCorridor(floor, 'East Gallery', hallX + cw, foot.y, rightW, foot.h, 'left');
+    else {
+      let y = foot.y; sides[1].forEach((r, i) => { const h = i === sides[1].length - 1 ? foot.y + foot.h - y : foot.h / sides[1].length; addProgramRoom(floor, r, hallX + cw, y, rightW, h, 'left'); y += h; });
+    }
+    if (fi === 0) floor.entrance = { x: hallX + cw / 2, y: foot.y + foot.h, width: FRONT };
+    if (c.floors > 1) floor.stairs = { x: hallX + 0.1, y: foot.y + 0.25, w: cw - 0.2, h: Math.min(2.7, foot.h - 0.5) };
+    applyWindows(floor.rooms, foot.x, foot.y, foot.w, foot.h); floors.push(floor);
   }
-  const layout: Layout = { plotW: c.plotW, plotD: c.plotD, foot: { x: fx, y: fy, w: fw, h: fh }, corridorX, CW, floors, partitions: true };
-  repair(layout, c);
-  return layout;
+  return {
+    plotW: c.plotW, plotD: c.plotD, foot, corridorX: hallX, CW: cw, floors, partitions: true,
+    planSource: 'procedural-relaxed', planSeed: seed, planCandidates: 56,
+    planConcept: 'Count-preserving compact plan; review highlighted minimum-size constraints.'
+  };
+}
+
+export function computeLayout(c: Spec, seedOverride?: number): Layout {
+  const requestedSeed = seedOverride ?? c.seed;
+  const seed = Number.isFinite(requestedSeed) ? (Math.floor(requestedSeed as number) >>> 0) : (Math.floor(Math.random() * 4294967296) >>> 0);
+  const { fw, fh, fx, fy } = sizedFootprint(c), foot = { x: fx, y: fy, w: fw, h: fh };
+  const attempts = 56, valid: Candidate[] = [];
+  let bestAny: Candidate | null = null;
+  for (let i = 0; i < attempts; i++) {
+    const cand = makeCandidate(c, foot, seed, i);
+    if (!cand) continue;
+    if (!bestAny || cand.validation.score + cand.quality * 0.05 > bestAny.validation.score + bestAny.quality * 0.05) bestAny = cand;
+    if (cand.validation.ok) valid.push(cand);
+  }
+  if (valid.length) {
+    valid.sort((a, b) => b.quality - a.quality);
+    const chosen = valid[0].layout;
+    chosen.planScore = Math.round(valid[0].quality * 10) / 10;
+    chosen.planCandidates = attempts;
+    return chosen;
+  }
+
+  // Templates remain compatibility-only and are never preferred over a valid
+  // generated candidate. They must pass the same strict validator to ship.
+  const tid = PlanTemplates.pickTemplate(c), template = buildFromTemplate(c, tid);
+  if (template && validateLayout(template, c).ok) {
+    template.planSeed = seed; template.planScore = validateLayout(template, c).score; template.planCandidates = attempts;
+    return template;
+  }
+  if (bestAny) {
+    bestAny.layout.planScore = Math.round(bestAny.quality * 10) / 10; bestAny.layout.planCandidates = attempts;
+    return bestAny.layout;
+  }
+  const relaxed = relaxedCountLayout(c, foot, seed); relaxed.planCandidates = attempts; relaxed.planScore = validateLayout(relaxed, c).score;
+  return relaxed;
 }
 
 const VALID_TYPES: Record<string, 1> = { living: 1, bedroom: 1, kitchen: 1, bathroom: 1, dining: 1, garage: 1, corridor: 1, room: 1 };
@@ -526,23 +1055,22 @@ const VALID_TYPES: Record<string, 1> = { living: 1, bedroom: 1, kitchen: 1, bath
 /* Convert an untrusted AI plan into a layout + a validation report (never throws). */
 export function fromAIReport(raw: RawPlan, c: Spec): AIReport {
   if (!raw || !Array.isArray(raw.floors) || !raw.floors.length) return { layout: null, validation: { ok: false, score: 0, issues: ['no floors'] }, coverage: 0 };
+  if (raw.floors.length !== c.floors) return { layout: null, validation: { ok: false, score: 0, issues: ['floor count: expected ' + c.floors + ', got ' + raw.floors.length] }, coverage: 0 };
   const { fw, fh, fx, fy } = sizedFootprint(c);
   const floors: Floor[] = [];
   let corridorX = fx + (fw - 1.25) / 2, CW = 1.25;
+  const finite = (v: unknown, fallback = Number.NaN): number => { const n = Number(v); return Number.isFinite(n) ? n : fallback; };
 
-  for (let fi = 0; fi < raw.floors.length && fi < c.floors; fi++) {
+  for (let fi = 0; fi < raw.floors.length; fi++) {
     const src = raw.floors[fi];
     const floor: Floor = { index: fi, rooms: [], corridor: null, entrance: null, stairs: null };
     (src.rooms || []).forEach(r => {
       if (!r.type || !VALID_TYPES[r.type]) return;
-      const x = fx + clamp(+(r.x ?? 0), 0, fw - 0.5);
-      const y = fy + clamp(+(r.y ?? 0), 0, fh - 0.5);
-      let w = clamp(+(r.w ?? 2), 0.8, fw - (x - fx));
-      let h = clamp(+(r.h ?? 2), 0.8, fh - (y - fy));
-      if (r.type === 'bathroom') { w = clamp(w, MIN.bathroom.w, fw); h = clamp(h, MIN.bathroom.h, fh); }
+      const x = fx + finite(r.x), y = fy + finite(r.y);
+      const w = finite(r.w), h = finite(r.h);
       const rm = mk(r.type as RoomType, r.name || r.type, x, y, w, h);
       if (r.door && r.door.side && ['left', 'right', 'top', 'bottom'].includes(r.door.side)) {
-        const dp = +(r.door.pos ?? 0) || 0;
+        const dp = finite(r.door.pos, 0);
         let pos: number;
         if (r.door.side === 'left' || r.door.side === 'right') pos = dp <= h + 0.01 ? y + clamp(dp, 0.3, h - 0.3) : dp;
         else pos = dp <= w + 0.01 ? x + clamp(dp, 0.3, w - 0.3) : dp;
@@ -551,11 +1079,15 @@ export function fromAIReport(raw: RawPlan, c: Spec): AIReport {
       floor.rooms.push(rm);
     });
     if (src.corridor) {
-      floor.corridor = { x: fx + (+(src.corridor.x ?? 0)), y: fy + (+(src.corridor.y ?? 0)), w: +(src.corridor.w ?? 1.2), h: +(src.corridor.h ?? fh) };
+      floor.corridor = { x: fx + finite(src.corridor.x, 0), y: fy + finite(src.corridor.y, 0), w: finite(src.corridor.w, 1.2), h: finite(src.corridor.h, fh) };
       corridorX = floor.corridor.x; CW = floor.corridor.w;
     }
-    if (src.entrance) floor.entrance = { x: fx + (+(src.entrance.x ?? fw / 2)), y: fy + (+(src.entrance.y ?? fh)), width: +(src.entrance.width ?? FRONT) };
-    if (src.stairs) floor.stairs = { x: fx + (+(src.stairs.x ?? 0)), y: fy + (+(src.stairs.y ?? 0)), w: +(src.stairs.w ?? 1.5), h: +(src.stairs.h ?? 2.5) };
+    else {
+      const cr = floor.rooms.find(r => r.type === 'corridor');
+      if (cr) { floor.corridor = { x: cr.x, y: cr.y, w: cr.w, h: cr.h }; corridorX = cr.x; CW = cr.w; }
+    }
+    if (src.entrance) floor.entrance = { x: fx + finite(src.entrance.x, fw / 2), y: fy + finite(src.entrance.y, fh), width: finite(src.entrance.width, FRONT) };
+    if (src.stairs) floor.stairs = { x: fx + finite(src.stairs.x, 0), y: fy + finite(src.stairs.y, 0), w: finite(src.stairs.w, 1.5), h: finite(src.stairs.h, 2.5) };
     applyWindows(floor.rooms, fx, fy, fw, fh);
     if (floor.rooms.length) floors.push(floor);
   }
@@ -577,5 +1109,5 @@ export function fromAI(raw: RawPlan, c: Spec): Layout | null {
   return rep.validation.ok ? rep.layout : null;
 }
 
-export const HouseLayout = { computeLayout, buildFromTemplate, fromAI, fromAIReport, validateLayout, repair, coverage, MIN };
+export const HouseLayout = { computeLayout, buildFromTemplate, fromAI, fromAIReport, inferSpecFromPrompt, validateLayout, repair, coverage, MIN, MIN_COVERAGE };
 export default HouseLayout;

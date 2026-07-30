@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
@@ -382,6 +383,44 @@ export class Viewer {
   setMode(m: 'orbit' | 'walk'): void { this.mode = m; if (this.orbit) this.orbit.enabled = (m === 'orbit'); if (m === 'walk') this.spawn(); else if (this.pl && this.pl.isLocked) this.pl.unlock(); this.vis(); if (m === 'orbit') this.frame(); }
   setFloor(f: number): void { this.floor = f; if (this.mode === 'walk') this.spawn(); this.vis(); }
   setCutaway(b: boolean): void { this.cut = b; this.vis(); }
+
+  /** Capture the exact canonical 3D design so AI renders can stay tied to the
+   * project instead of inventing an unrelated house from text alone. */
+  captureDataURL(): string {
+    if (!this.renderer || !this.scene || !this.camera) throw new Error('The 3D scene is not ready yet.');
+    if (this.composer) this.composer.render();
+    else this.renderer.render(this.scene, this.camera);
+    return this.renderer.domElement.toDataURL('image/png');
+  }
+
+  /** Export the generated house as a binary glTF asset. The export contains
+   * the procedural architecture, furniture and embedded materials currently
+   * loaded in the scene, without the editor lights/sky. */
+  async exportGLB(): Promise<Blob> {
+    if (!this.root) throw new Error('Generate a house before exporting it.');
+    const project = this.root.clone(true);
+    project.name = 'ForthHome_Project';
+    project.userData = {
+      generator: 'ForthHome',
+      units: 'metres',
+      floors: this.desc?.floors || 1,
+      exportedAt: new Date().toISOString()
+    };
+    project.updateMatrixWorld(true);
+    const binary = await new Promise<ArrayBuffer>((resolve, reject) => {
+      new GLTFExporter().parse(
+        project,
+        result => {
+          if (result instanceof ArrayBuffer) resolve(result);
+          else reject(new Error('The exporter returned JSON instead of a binary asset.'));
+        },
+        error => reject(error instanceof Error ? error : new Error(String(error))),
+        { binary: true, onlyVisible: false, maxTextureSize: 2048 }
+      );
+    });
+    return new Blob([binary], { type: 'model/gltf-binary' });
+  }
+
   private vis(): void {
     const ob = this.mode === 'orbit';
     if (this.roof) this.roof.visible = ob && !this.cut;

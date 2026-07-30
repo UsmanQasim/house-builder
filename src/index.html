@@ -1,212 +1,256 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ForthHome — 3D House Designer</title>
-<style>
-  :root{ --bg:#0e1014; --panel:#14171e; --p2:#1c212b; --p3:#232a36; --line:#2b3340;
-    --txt:#eef1f6; --mut:#94a1b4; --mut2:#6b7686; --acc:#6c8cff; --acc2:#34d0a4; --radius:13px; }
-  *{box-sizing:border-box}
-  html,body{margin:0;height:100%;font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--txt);overflow:hidden}
-  button{font-family:inherit}
-  ::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#2b3340;border-radius:8px}
-  #app{display:grid;grid-template-columns:328px 1fr;grid-template-rows:56px 1fr;height:100vh;width:100vw}
-  header{grid-column:1/span 2;display:flex;align-items:center;gap:14px;padding:0 18px;background:linear-gradient(180deg,#171b23,#13161d);border-bottom:1px solid var(--line);z-index:5}
-  .logo{font-weight:800;font-size:16px}.logo .d{color:var(--acc)}
-  .logo small{display:block;font-weight:500;font-size:10px;color:var(--mut);letter-spacing:.16em;text-transform:uppercase;margin-top:1px}
-  .spacer{flex:1}
-  .maintabs{display:flex;gap:6px}
-  .mtab{background:var(--p2);border:1px solid var(--line);color:var(--mut);border-radius:9px;padding:8px 14px;cursor:pointer;font-size:13px;font-weight:600}
-  .mtab.active{background:var(--acc);color:#fff;border-color:var(--acc)}
-  aside{background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;padding:17px}
-  .sec{margin-bottom:18px}.sec h2{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--mut);margin:0 0 10px}
-  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
-  .field{margin-bottom:10px}label{display:block;font-size:11.5px;color:var(--mut);margin-bottom:5px}
-  input[type=number],select{width:100%;background:var(--p2);border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:9px;font-size:14px}
-  textarea{width:100%;background:var(--p2);border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:10px;font-size:13px;font-family:inherit;resize:vertical;line-height:1.5}
-  textarea:focus{outline:none;border-color:var(--acc)}
-  .promptsec{background:linear-gradient(180deg,#1b2230,#161b24);border:1px solid #2b3550;border-radius:13px;padding:13px;margin-bottom:18px}
-  .promptsec h2{margin-top:0}
-  input:focus,select:focus{outline:none;border-color:var(--acc)}
-  .chips{display:flex;gap:8px}.chip{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;font-size:13px;color:var(--mut);cursor:pointer;background:var(--p2);border:1px solid var(--line);border-radius:9px;padding:9px;user-select:none}
-  .chip input{display:none}.chip.on{color:#fff;border-color:var(--acc);background:#1d2533}
-  .stat{font-size:12px;color:var(--mut)}.stat b{color:var(--acc2);font-weight:700}
-  .primary{width:100%;background:linear-gradient(180deg,#7a97ff,#5b7cf6);color:#fff;border:0;border-radius:11px;padding:12px;font-size:15px;font-weight:700;cursor:pointer;box-shadow:0 6px 18px rgba(91,124,246,.32)}
-  .primary:hover{filter:brightness(1.06)}.primary:disabled{opacity:.6;cursor:wait}
-  .ghost{background:var(--p2);border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:8px 12px;cursor:pointer;font-size:13px;font-weight:600}
-  .ghost:hover{border-color:var(--acc);background:var(--p3)}.ghost:disabled{opacity:.5;cursor:not-allowed}
-  .mini{display:flex;gap:8px;margin-top:8px}.mini button{flex:1}
-  .seg{display:flex;background:var(--p2);border:1px solid var(--line);border-radius:9px;overflow:hidden}
-  .seg button{background:transparent;color:var(--mut);border:0;padding:7px 13px;cursor:pointer;font-size:12.5px;font-weight:600}
-  .seg button.active{background:var(--acc);color:#fff}
-  .aibox{background:linear-gradient(180deg,#191f2b,#161b24);border:1px solid var(--line);border-radius:12px;padding:12px}
-  .aibadge{display:inline-flex;gap:6px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#0e1014;background:linear-gradient(90deg,#34d0a4,#6c8cff);padding:3px 8px;border-radius:20px}
-  .aibanner{font-size:11.5px;line-height:1.5;margin:10px 0;padding:8px 10px;border-radius:8px;background:var(--p2);border:1px solid var(--line);color:var(--mut)}
-  .aibanner.ok{border-color:#2a6b55;color:#9fe3cb;background:#142019}.aibanner.warn{border-color:#7a5a2a;color:#ffd9a3;background:#211a12}
-  .aibanner a{color:var(--acc)}
-  .refstrip{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}.refthumb{position:relative}.refthumb img{width:60px;height:46px;object-fit:cover;border-radius:7px;border:1px solid var(--line)}
-  .refsearch{display:flex;gap:6px;margin-top:8px} .refsearch input{flex:1;background:var(--p2);border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:8px;font-size:12.5px}
-  .webgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px;max-height:140px;overflow:auto}
-  .webpick{border:1px solid var(--line);border-radius:7px;padding:0;background:var(--p2);cursor:pointer;overflow:hidden}.webpick:hover{border-color:var(--acc)}
-  .webpick img{width:100%;height:52px;object-fit:cover;display:block}
-  .refthumb button{position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;border:0;background:#ff6b6b;color:#fff;font-size:12px;cursor:pointer;line-height:1}
-  .hint{font-size:11px;color:var(--mut2);line-height:1.5;margin-top:8px}
-  main{position:relative;overflow:hidden;display:flex;flex-direction:column;background:#0b0d11}
-  #welcome{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;text-align:center;color:var(--mut);padding:0 30px}
-  #welcome h1{color:#fff;font-size:23px;margin:0;font-weight:800}
-  #stage{flex:1;display:flex;flex-direction:column;min-height:0}
-  .barwrap{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line);background:#0e1116;flex-wrap:wrap}
-  .floors{display:flex;gap:6px;flex-wrap:wrap}
-  .fbtn{background:var(--p2);border:1px solid var(--line);color:var(--mut);border-radius:8px;padding:6px 11px;cursor:pointer;font-size:12.5px;font-weight:600}
-  .fbtn.active{border-color:var(--acc);color:#fff;background:#1d2533}
-  .hint3d{font-size:11px;color:var(--mut2)}
-  .panel{flex:1;min-height:0;display:flex;flex-direction:column}
-  .view3d{flex:1;min-height:0;position:relative;background:#0b0d11}
-  .view3d canvas{display:block;width:100%;height:100%}
-  .planhost{flex:1;min-height:0;background:#0b0d11;display:flex;padding:14px}
-  .planhost svg{background:#fff;border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,.4)}
-  .viewbar{display:flex;gap:8px;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid var(--line);background:#0e1116}
-  .gallery{flex:1;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;padding:16px;align-content:start}
-  .shot{background:var(--p2);border:1px solid var(--line);border-radius:12px;overflow:hidden;min-height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center}
-  .shot img{width:100%;display:block;cursor:zoom-in}
-  .shot .cap{font-size:12px;color:var(--mut);padding:8px 10px;display:flex;justify-content:space-between;width:100%}
-  .shot.err{border-color:#7a3a3a}.shot .emsg{font-size:11px;color:#ffb4b4;padding:0 12px 12px;text-align:center;white-space:pre-wrap}
-  .dlink{color:var(--acc);text-decoration:none;font-weight:700}
-  .schemeout{flex:1;overflow:auto;padding:18px;max-width:760px}
-  .concept{font-size:15px;line-height:1.6;color:#dbe2ec;margin-bottom:16px}
-  .swatches{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
-  .sw{width:62px;height:62px;border-radius:10px;border:1px solid rgba(255,255,255,.15);position:relative}
-  .sw span{position:absolute;bottom:-16px;left:0;right:0;text-align:center;font-size:9px;color:var(--mut)}
-  .rnote{font-size:13px;color:var(--mut);line-height:1.55;margin:8px 0;padding-left:12px;border-left:2px solid var(--p3)}.rnote b{color:#dbe2ec;text-transform:capitalize;margin-right:6px}
-  .spin{width:30px;height:30px;border:3px solid rgba(255,255,255,.18);border-top-color:var(--acc);border-radius:50%;animation:sp .8s linear infinite}
-  .btnspin{width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:-2px;border-top-color:#fff}
-  @keyframes sp{to{transform:rotate(360deg)}}
-  #toast{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);background:#12151c;border:1px solid var(--line);color:var(--txt);padding:11px 17px;border-radius:11px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;max-width:80%;white-space:pre-wrap;box-shadow:0 10px 30px rgba(0,0,0,.4);z-index:50}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#f3efe7">
+  <title>ForthHome Studio — AI home concept designer</title>
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-<div id="app">
-  <header>
-    <div class="logo">Forth<span class="d">Home</span><small>3D House Designer</small></div>
-    <div class="spacer"></div>
-    <div class="maintabs">
-      <button id="tab-three" class="mtab active">3D model</button>
-      <button id="tab-plan" class="mtab">Floor plan</button>
-      <button id="tab-renders" class="mtab">Photoreal renders</button>
-      <button id="tab-scheme" class="mtab">Design scheme</button>
-    </div>
-  </header>
+  <div id="app">
+    <header class="topbar">
+      <button class="brand" id="brandBtn" type="button" aria-label="Start a new ForthHome project">
+        <span class="brand-mark" aria-hidden="true">FH</span>
+        <span><strong>ForthHome</strong><small>Concept Studio</small></span>
+      </button>
 
-  <aside>
-    <div class="sec promptsec">
-      <h2>✨ Describe your dream home</h2>
-      <textarea id="promptText" rows="3" placeholder="e.g. A 4-bedroom modern villa with an open-plan kitchen + dining, a home office, a double garage and a large master suite with ensuite"></textarea>
-      <div class="chips" style="margin-top:9px"><label class="chip on" id="aiChip"><input id="aiPromptToggle" type="checkbox" checked> ✨ Use my description when I Generate</label></div>
-      <div class="hint">Optional. Describe what you want (e.g. “ensuite bathroom in the master, big kitchen”), then press <b>Generate house</b> below. Toggle off to ignore it. Ctrl/Cmd+Enter also runs.</div>
-    </div>
-    <div class="sec">
-      <h2>Land &amp; structure</h2>
-      <div class="row">
-        <div class="field"><label>House width (m)</label><input id="plotW" type="number" min="6" max="80" value="11"></div>
-        <div class="field"><label>House length (m)</label><input id="plotD" type="number" min="6" max="80" value="13"></div>
-      </div>
-      <div class="stat">House size <b id="areaStat">143 m²</b> · <span id="areaFt">1,539 ft²</span> · the plan &amp; 3D follow these</div>
-      <div class="row" style="margin-top:10px">
-        <div class="field"><label>Floors</label><input id="floors" type="number" min="1" max="4" value="2"></div>
-        <div class="field"><label>Living rooms</label><input id="living" type="number" min="0" max="4" value="1"></div>
-      </div>
-    </div>
-    <div class="sec">
-      <h2>Rooms</h2>
-      <div class="row3">
-        <div class="field"><label>Bedrooms</label><input id="bedrooms" type="number" min="0" max="12" value="3"></div>
-        <div class="field"><label>Bathrooms</label><input id="bathrooms" type="number" min="0" max="8" value="2"></div>
-        <div class="field"><label>Kitchens</label><input id="kitchens" type="number" min="0" max="4" value="1"></div>
-      </div>
-      <div class="chips">
-        <label class="chip on" id="diningChip"><input id="dining" type="checkbox" checked> Dining</label>
-        <label class="chip on" id="garageChip"><input id="garage" type="checkbox" checked> Garage</label>
-      </div>
-    </div>
-    <div class="sec">
-      <h2>Style</h2>
-      <div class="field"><select id="style">
-        <option value="modern">Modern</option><option value="traditional">Traditional</option>
-        <option value="minimalist">Minimalist</option><option value="scandinavian">Scandinavian</option>
-        <option value="industrial">Industrial</option>
-      </select></div>
-      <button class="primary" id="generateBtn">Generate house</button>
-      <div class="chips" style="margin-top:10px"><label class="chip on" id="aiPlanChip"><input id="aiPlans" type="checkbox" checked> Smart plan picker (AI)</label></div>
-      <div class="mini"><button class="ghost" id="randomBtn">🎲 Surprise me</button></div>
-    </div>
-    <div class="sec">
-      <h2>AI photoreal (optional)</h2>
-      <div class="aibox">
-        <span class="aibadge">AI</span>
-        <div class="aibanner" id="aiBanner">Checking…</div>
-        <div class="mini">
-          <button class="ghost" id="schemeBtn">Design scheme</button>
-          <button class="ghost" id="diagBtn">Test AI</button>
-        </div>
-        <div class="hint">Floor plans use AI + free web search. Renders need an image-capable key (e.g. org verified for <code>gpt-image-1</code>).</div>
-      </div>
-    </div>
-    <div class="sec promptsec">
-      <h2>📐 Build from a real floor plan</h2>
-      <button class="primary" id="planImgBtn" style="background:linear-gradient(180deg,#37c98a,#21a76e);box-shadow:0 6px 18px rgba(33,167,110,.3)">Upload a floor-plan image</button>
-      <input id="planImgInput" type="file" accept="image/*" style="display:none">
-      <div class="hint">Google a plan you like (e.g. <b>"5 marla house plan"</b>), save the image, and upload it — AI vision reads it and rebuilds it as your 3D house. Set <b>Floors</b> to match the plan first.</div>
-    </div>
-    <div class="sec">
-      <h2>Reference images</h2>
-      <div class="mini"><button class="ghost" id="uploadBtn">Upload inspiration</button></div>
-      <input id="fileInput" type="file" accept="image/*" multiple style="display:none">
-      <div class="refsearch"><input id="webQuery" type="text" placeholder="Search web (e.g. modern kitchen)" maxlength="80"><button class="ghost" id="webSearchBtn">Search</button></div>
-      <div class="webgrid" id="webGrid"></div>
-      <div class="refstrip" id="refStrip"></div>
-      <div class="hint">Upload or pick web images to steer AI renders. Needs <code>UNSPLASH_ACCESS_KEY</code> for search.</div>
-    </div>
-  </aside>
+      <nav class="workflow" role="tablist" aria-label="Project workflow">
+        <button id="tab-create" class="workflow-tab active" type="button" role="tab" aria-selected="true" aria-controls="stage-create" data-stage="create"><span>01</span>Create</button>
+        <button id="tab-plan" class="workflow-tab" type="button" role="tab" aria-selected="false" aria-controls="stage-plan" data-stage="plan" disabled><span>02</span>Plan</button>
+        <button id="tab-visualize" class="workflow-tab" type="button" role="tab" aria-selected="false" aria-controls="stage-visualize" data-stage="visualize" disabled><span>03</span>Visualize</button>
+        <button id="tab-present" class="workflow-tab" type="button" role="tab" aria-selected="false" aria-controls="stage-present" data-stage="present" disabled><span>04</span>Present</button>
+      </nav>
 
-  <main>
-    <div id="welcome"><h1>Build &amp; walk through your future home</h1><div>Set land, rooms and style, then <b>Generate house</b>.</div></div>
-    <div id="stage" style="display:none">
-      <div id="panel-three" class="panel">
-        <div class="barwrap">
-          <div class="seg" id="mode3d"><button data-m="orbit" class="active">Orbit</button><button data-m="walk">Walk</button></div>
-          <div class="floors" id="floorBar3d"></div>
-          <button class="ghost" id="cutBtn">Cutaway: off</button>
-          <button class="ghost" id="nightBtn">🌙 Night</button>
-          <span class="spacer"></span>
-          <span class="hint3d">Walk: click scene · <b>WASD</b> + mouse · Shift run · C no-clip · Esc release</span>
+      <div class="project-tools">
+        <label class="project-name-wrap" for="projectName"><span class="sr-only">Project name</span><input id="projectName" value="Untitled residence" maxlength="64" aria-label="Project name"></label>
+        <span id="saveState" class="save-state" aria-live="polite">Local draft</span>
+        <span id="serviceBadge" class="service-badge checking"><i aria-hidden="true"></i><span>Checking studio</span></span>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section id="stage-create" class="stage create-stage active" role="tabpanel" aria-labelledby="tab-create" tabindex="0">
+        <div class="create-shell">
+          <div class="create-intro">
+            <p class="eyebrow">Residential concept design</p>
+            <h1>Turn a clear brief into a home you can walk through.</h1>
+            <p class="lede">Start with your idea. ForthHome drafts the plan first, checks its fundamentals, then carries the accepted design into 3D and presentation renders.</p>
+            <div class="trust-row" aria-label="Workflow benefits">
+              <span>Plan-first workflow</span><span>Visible quality checks</span><span>Exportable 3D</span>
+            </div>
+          </div>
+
+          <div class="sample-board" aria-hidden="true">
+            <div class="sample-caption"><span>Sample concept</span><strong>Courtyard House</strong></div>
+            <svg viewBox="0 0 520 340" focusable="false">
+              <rect x="46" y="34" width="428" height="270" rx="3" fill="#f9f7f1" stroke="#363b37" stroke-width="5"/>
+              <path d="M46 168h145V34M191 168v136M191 105h133v199M324 34v96h150M324 212h150" fill="none" stroke="#545b55" stroke-width="3"/>
+              <rect x="213" y="128" width="89" height="62" fill="#d8e1d5" stroke="#7d927f" stroke-width="2"/>
+              <path d="M72 56h78M72 278h78M348 56h90M448 148v44M448 238v42" stroke="#7da5b1" stroke-width="6"/>
+              <g fill="#747b74" font-family="sans-serif" font-size="12" letter-spacing="1">
+                <text x="91" y="101">LIVING</text><text x="224" y="76">KITCHEN</text><text x="348" y="86">BEDROOM</text>
+                <text x="229" y="164">COURT</text><text x="83" y="232">STUDIO</text><text x="354" y="258">SUITE</text>
+              </g>
+            </svg>
+            <div class="sample-stat"><span>4 bed · 3 bath</span><span>2 floors · 238 m²</span></div>
+          </div>
+
+          <form id="briefForm" class="brief-card">
+            <div class="card-heading">
+              <div><p class="eyebrow">Your design brief</p><h2>Describe the home</h2></div>
+              <button id="randomBtn" class="text-button" type="button">Inspire me</button>
+            </div>
+            <label class="sr-only" for="promptText">Describe your home</label>
+            <textarea id="promptText" rows="5" placeholder="A light-filled four-bedroom family home with a quiet courtyard, an open kitchen facing the garden, a private home office and a calm primary suite…"></textarea>
+            <div class="prompt-suggestions" aria-label="Example briefs">
+              <button type="button" data-prompt="A warm modern family home organized around a private courtyard, with connected kitchen, dining and garden spaces.">Courtyard family home</button>
+              <button type="button" data-prompt="A compact urban home with flexible work space, strong daylight and efficient circulation on a narrow plot.">Compact urban home</button>
+              <button type="button" data-prompt="A serene single-storey retreat with a generous primary suite, shaded outdoor living and natural materials.">Single-storey retreat</button>
+            </div>
+
+            <div class="requirements-grid" aria-label="Core requirements">
+              <label><span>Site width <small>metres</small></span><input id="plotW" type="number" min="6" max="80" step="0.5" value="11" inputmode="decimal"></label>
+              <label><span>Site depth <small>metres</small></span><input id="plotD" type="number" min="6" max="80" step="0.5" value="13" inputmode="decimal"></label>
+              <label><span>Floors</span><input id="floors" type="number" min="1" max="4" value="2" inputmode="numeric"></label>
+              <label><span>Bedrooms</span><input id="bedrooms" type="number" min="0" max="12" value="3" inputmode="numeric"></label>
+              <label><span>Bathrooms</span><input id="bathrooms" type="number" min="0" max="8" value="2" inputmode="numeric"></label>
+              <label><span>Living rooms</span><input id="living" type="number" min="0" max="4" value="1" inputmode="numeric"></label>
+            </div>
+            <p class="area-readout">Site area <strong id="areaStat">143 m²</strong><span aria-hidden="true">·</span><span id="areaFt">1,539 ft²</span></p>
+
+            <details class="advanced-brief">
+              <summary>Refine rooms and planning preferences</summary>
+              <div class="advanced-body">
+                <div class="field-row">
+                  <label><span>Kitchens</span><input id="kitchens" type="number" min="0" max="4" value="1"></label>
+                  <label class="check-field"><input id="dining" type="checkbox" checked><span><strong>Dedicated dining</strong><small>Include a distinct dining zone</small></span></label>
+                  <label class="check-field"><input id="garage" type="checkbox" checked><span><strong>Garage</strong><small>Include vehicle storage</small></span></label>
+                </div>
+                <div class="custom-spaces">
+                  <div><strong>Extra named spaces</strong><small>Add offices, laundries, prayer rooms, gyms or any other required space.</small></div>
+                  <div class="custom-space-builder">
+                    <label class="sr-only" for="customRoomName">Space name</label><input id="customRoomName" maxlength="48" placeholder="e.g. Home office">
+                    <label class="sr-only" for="customRoomCount">Count</label><input id="customRoomCount" type="number" min="1" max="4" value="1" aria-label="Number of spaces">
+                    <label class="sr-only" for="customRoomFloor">Preferred floor</label><select id="customRoomFloor" aria-label="Preferred floor"><option value="">Any floor</option><option value="0">Level 1</option><option value="1">Level 2</option><option value="2">Level 3</option><option value="3">Level 4</option></select>
+                    <button id="addCustomRoomBtn" class="secondary-action" type="button">Add space</button>
+                  </div>
+                  <div id="customRoomChips" class="custom-room-chips" aria-live="polite"></div>
+                </div>
+                <fieldset class="style-fieldset">
+                  <legend>Architectural character</legend>
+                  <div class="style-grid">
+                    <label><input type="radio" name="style" value="modern" checked><span><i class="style-swatch modern"></i><strong>Warm modern</strong><small>Quiet lines · natural texture</small></span></label>
+                    <label><input type="radio" name="style" value="scandinavian"><span><i class="style-swatch scandinavian"></i><strong>Scandinavian</strong><small>Light timber · soft minimalism</small></span></label>
+                    <label><input type="radio" name="style" value="traditional"><span><i class="style-swatch traditional"></i><strong>Contemporary classic</strong><small>Balanced · enduring detail</small></span></label>
+                    <label><input type="radio" name="style" value="minimalist"><span><i class="style-swatch minimalist"></i><strong>Minimal</strong><small>Monolithic · restrained</small></span></label>
+                    <label><input type="radio" name="style" value="industrial"><span><i class="style-swatch industrial"></i><strong>Industrial</strong><small>Brick · steel · open volume</small></span></label>
+                  </div>
+                </fieldset>
+                <label class="check-field ai-choice"><input id="aiPlans" type="checkbox" checked><span><strong>Use bespoke AI planning when available</strong><small>Any offline fallback will be clearly labelled before you continue.</small></span></label>
+              </div>
+            </details>
+
+            <div id="generationProgress" class="generation-progress" role="status" aria-live="polite" hidden>
+              <span class="spinner" aria-hidden="true"></span><div><strong id="generationTitle">Reading your brief</strong><small id="generationDetail">Preparing spatial requirements…</small></div>
+            </div>
+            <button id="generateBtn" class="primary-action" type="submit"><span>Create plan</span><span aria-hidden="true">→</span></button>
+            <p class="concept-disclaimer">Concept design only. Confirm structure, codes and construction documentation with a licensed professional.</p>
+          </form>
+
+          <section class="alternate-inputs" aria-labelledby="alternate-title">
+            <div class="section-heading"><p class="eyebrow">Bring a starting point</p><h2 id="alternate-title">Use a plan or visual references</h2></div>
+            <div class="alternate-grid">
+              <article class="source-card">
+                <span class="source-icon" aria-hidden="true">⌁</span><div><h3>Interpret a floor plan</h3><p>Upload a clear plan image. You will review detected rooms before it becomes the project.</p></div>
+                <button id="planImgBtn" class="secondary-action" type="button">Choose plan image</button>
+                <input id="planImgInput" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+              </article>
+              <article class="source-card references-card">
+                <span class="source-icon" aria-hidden="true">◫</span><div><h3>Add visual direction</h3><p>Up to three references can guide palette, materials and presentation renders.</p></div>
+                <div class="reference-actions">
+                  <button id="uploadBtn" class="secondary-action" type="button">Upload references</button>
+                  <input id="fileInput" type="file" accept="image/*" multiple hidden>
+                  <div class="search-field"><label class="sr-only" for="webQuery">Search reference images</label><input id="webQuery" placeholder="Search interiors or facades" maxlength="80"><button id="webSearchBtn" type="button" aria-label="Search reference images">Search</button></div>
+                </div>
+                <div id="webGrid" class="web-grid" aria-live="polite"></div>
+                <div class="reference-heading"><span id="referenceCount">0 of 3 selected</span></div>
+                <div id="refStrip" class="reference-strip"></div>
+              </article>
+            </div>
+          </section>
+
+          <section id="resumeCard" class="resume-card" hidden>
+            <div><p class="eyebrow">Saved in this browser</p><h2>Continue your latest concept</h2><p id="resumeSummary"></p></div>
+            <button id="resumeBtn" class="secondary-action" type="button">Open latest version</button>
+          </section>
         </div>
-        <div id="view3d" class="view3d"></div>
-      </div>
-      <div id="panel-plan" class="panel" style="display:none">
-        <div class="barwrap"><div class="floors" id="floorBar"></div><span class="spacer"></span>
-          <button class="ghost" id="aiPlanRenderBtn" title="Nano Banana Pro turns the schematic into a beautiful presentation plan">✨ AI render</button>
-          <button class="ghost" id="dlSvg">Download SVG</button><button class="ghost" id="dlPng">Download PNG</button></div>
-        <div class="planhost" id="planHost"></div>
-      </div>
-      <div id="panel-renders" class="panel" style="display:none">
-        <div class="viewbar">
-          <button class="ghost" data-view="house exterior">Exterior</button>
-          <button class="ghost" data-view="living room">Living room</button>
-          <button class="ghost" data-view="master bedroom">Master bedroom</button>
-          <button class="ghost" data-view="kitchen">Kitchen</button>
-          <button class="ghost" data-view="bathroom">Bathroom</button>
-          <button class="ghost" data-view="dining room">Dining</button>
+      </section>
+
+      <section id="stage-plan" class="stage" role="tabpanel" aria-labelledby="tab-plan" tabindex="0" hidden>
+        <div class="stage-toolbar">
+          <div class="stage-title"><p class="eyebrow">Plan review</p><h1 id="planTitle">Concept plan</h1><p id="planSubtitle">Review the plan before carrying it into 3D.</p></div>
+          <div class="toolbar-actions">
+            <button id="aiPlanRenderBtn" class="tool-button" type="button">Presentation plan</button>
+            <button id="dlSvg" class="tool-button" type="button">SVG</button>
+            <button id="dlPng" class="tool-button" type="button">PNG</button>
+            <button id="planTo3dBtn" class="primary-compact" type="button">Accept &amp; visualize <span aria-hidden="true">→</span></button>
+          </div>
         </div>
-        <div class="gallery" id="gallery"></div>
-      </div>
-      <div id="panel-scheme" class="panel" style="display:none">
-        <div class="schemeout" id="schemeOut"><div class="hint">Press <b>Design scheme</b> for a cohesive palette + per-room notes.</div></div>
-      </div>
-    </div>
-    <div id="toast"></div>
-  </main>
-</div>
-<script type="module" src="/app.ts"></script>
+        <div id="fallbackNotice" class="fallback-notice" role="alert" hidden></div>
+        <div class="plan-workspace">
+          <div class="canvas-column">
+            <div class="canvas-bar"><div id="floorBar" class="floor-tabs" role="tablist" aria-label="Plan floors"></div><span class="canvas-note">Scroll or pinch to inspect · dimensions in metres</span></div>
+            <div id="planHost" class="plan-host" aria-label="Generated floor plan"></div>
+          </div>
+          <aside class="plan-inspector" aria-label="Plan quality and revisions">
+            <section class="inspector-card provenance-card">
+              <div class="provenance-line"><span id="provenanceBadge" class="provenance-badge">Concept</span><span id="planSeed"></span></div>
+              <h2>How this plan was made</h2><p id="provenanceText"></p>
+            </section>
+            <section class="inspector-card quality-card">
+              <div class="quality-heading"><div><p class="eyebrow">Concept checks</p><h2>Plan quality</h2></div><div id="qualityScore" class="quality-score" aria-label="Plan quality score"><strong>—</strong><span>/100</span></div></div>
+              <ul id="qualityChecks" class="quality-checks"></ul>
+              <p class="quality-note">Automated concept checks are not a structural, code or construction review.</p>
+            </section>
+            <section class="inspector-card concept-card">
+              <p class="eyebrow">Design rationale</p><h2>Concept</h2><p id="conceptText">No concept note was supplied.</p><p id="inspirationText" class="muted-copy"></p>
+            </section>
+            <section class="inspector-card revision-card">
+              <p class="eyebrow">Create another version</p><h2>Refine this plan</h2>
+              <label class="sr-only" for="reviseText">Describe your revision</label><textarea id="reviseText" rows="3" placeholder="Make the kitchen larger and keep the study away from the living room."></textarea>
+              <button id="reviseBtn" class="secondary-action full" type="button">Generate revised version</button>
+            </section>
+            <section class="inspector-card history-card">
+              <div class="history-title"><div><p class="eyebrow">Saved locally</p><h2>Version history</h2></div><button id="saveVersionBtn" class="text-button" type="button">Save now</button></div>
+              <label class="sr-only" for="versionSelect">Saved versions</label><select id="versionSelect"></select>
+            </section>
+          </aside>
+        </div>
+      </section>
+
+      <section id="stage-visualize" class="stage" role="tabpanel" aria-labelledby="tab-visualize" tabindex="0" hidden>
+        <div class="stage-toolbar compact-toolbar">
+          <div class="stage-title"><p class="eyebrow">Spatial preview</p><h1>Walk through the accepted plan</h1></div>
+          <div class="toolbar-actions">
+            <div id="mode3d" class="segmented" role="group" aria-label="3D navigation mode"><button class="active" type="button" data-m="orbit" aria-pressed="true">Orbit</button><button type="button" data-m="walk" aria-pressed="false">Walk</button></div>
+            <button id="cutBtn" class="tool-button" type="button" aria-pressed="false">Cutaway</button>
+            <button id="nightBtn" class="tool-button" type="button" aria-pressed="false">Evening</button>
+            <button id="exportGlbBtn" class="tool-button strong" type="button">Export GLB</button>
+            <button id="goPresentBtn" class="primary-compact" type="button">Create presentation <span aria-hidden="true">→</span></button>
+          </div>
+        </div>
+        <div class="visual-workspace">
+          <div class="viewer-column">
+            <div class="canvas-bar"><div id="floorBar3d" class="floor-tabs" role="tablist" aria-label="3D floors"></div><span class="canvas-note"><span class="desktop-hint">Orbit: drag to rotate · scroll to zoom</span><span class="walk-hint">Walk: click the scene · WASD · Esc to leave</span></span></div>
+            <div id="view3d" class="view3d" aria-label="Interactive 3D house preview"></div>
+          </div>
+          <aside class="design-inspector" aria-label="Interior design direction">
+            <section class="inspector-card design-brief-card">
+              <p class="eyebrow">Interior direction</p><h2>One language, every room</h2><p>Generate a cohesive palette and room notes, then carry them into 3D and every presentation render.</p>
+              <button id="schemeBtn" class="secondary-action full" type="button">Create design direction</button>
+            </section>
+            <div id="schemeOut" class="scheme-out"><div class="empty-mini"><span aria-hidden="true">◌</span><p>Your material palette will appear here.</p></div></div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="stage-present" class="stage present-stage" role="tabpanel" aria-labelledby="tab-present" tabindex="0" hidden>
+        <div class="stage-toolbar">
+          <div class="stage-title"><p class="eyebrow">Presentation studio</p><h1>Create a consistent project story</h1><p>Each view is anchored to your accepted plan and current 3D scene.</p></div>
+          <div class="toolbar-actions render-controls">
+            <label for="renderQuality">Output</label><select id="renderQuality"><option value="low">Draft · faster</option><option value="high">Final · high detail</option></select>
+            <button id="generateSetBtn" class="primary-compact" type="button">Generate 4-view set</button>
+          </div>
+        </div>
+        <div class="present-toolbar" aria-label="Generate individual views">
+          <span>Individual views</span>
+          <button class="view-chip" type="button" data-view="front three-quarter house exterior" data-label="Exterior hero">Exterior hero</button>
+          <button class="view-chip" type="button" data-view="garden-facing house exterior" data-label="Garden elevation">Garden elevation</button>
+          <button class="view-chip" type="button" data-view="living room" data-label="Living room">Living room</button>
+          <button class="view-chip" type="button" data-view="kitchen and dining room" data-label="Kitchen &amp; dining">Kitchen &amp; dining</button>
+          <button class="view-chip" type="button" data-view="primary bedroom" data-label="Primary suite">Primary suite</button>
+          <button class="view-chip" type="button" data-view="bathroom" data-label="Bathroom">Bathroom</button>
+        </div>
+        <div id="gallery" class="gallery" aria-live="polite">
+          <div id="galleryEmpty" class="gallery-empty"><div class="render-sample-grid" aria-hidden="true"><i></i><i></i><i></i><i></i></div><div><p class="eyebrow">No renders yet</p><h2>Build the presentation set when the plan and style feel right.</h2><p>Draft mode is ideal for review. Final mode is intended for your selected views.</p></div></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+
+  <dialog id="planConfirmDialog" class="plan-dialog" aria-labelledby="planDialogTitle">
+    <form method="dialog" class="dialog-card">
+      <div class="dialog-heading"><div><p class="eyebrow">Plan interpretation</p><h2 id="planDialogTitle">Review detected rooms</h2></div><button class="dialog-close" value="cancel" aria-label="Close dialog">×</button></div>
+      <p id="planDialogWarning" class="dialog-warning" hidden></p>
+      <p id="planDialogConcept" class="dialog-concept"></p>
+      <div id="planDialogRooms" class="detected-rooms"></div>
+      <div class="dialog-actions"><button value="cancel" class="secondary-action">Try another image</button><button id="confirmPlanBuild" value="default" class="primary-compact">Use this concept</button></div>
+    </form>
+  </dialog>
+
+  <script type="module" src="/app.ts"></script>
 </body>
 </html>

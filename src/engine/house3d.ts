@@ -1,7 +1,7 @@
 /* ForthHome 3D — walkable house description built from a Layout (TypeScript, pure data).
  * describeHouse() has no Three.js dependency (Node-testable). viewer.ts renders it.
  * Plan coords (m, origin top-left, y=down) map to world (x, z=y). */
-import type { CollisionBox, GeoKind, ItemKind, Layout, Room, SceneDescription, SceneItem, Side, Spec } from './types.js';
+import type { CollisionBox, GeoKind, ItemKind, Layout, Rect, Room, SceneDescription, SceneItem, Side, Spec } from './types.js';
 
 export const WALLH = 2.8, SLAB = 0.12, WT = 0.1, DOORH = 2.05, SILL = 0.9, WINH = 1.25, EYE = 1.6, PR = 0.3;
 
@@ -18,9 +18,32 @@ export const STYLES: Record<string, StyleDef> = {
   industrial:  { wall:'#bdb8b2', ext:'#9a6a4a', extTex:'brick', wood:'#7a6a55', tile:'#9a9794', carpet:'#8a8480', concrete:'#8a8784', roof:'#1e2024', roofTex:'membrane', trim:'#2a2d33', roofType:'flat', curtain:'#9a948c', doorLeaf:'#3a3d42' }
 };
 const FURN = { wood:'#8a5a32', woodL:'#caa06a', fab:'#5b6678', fabL:'#94a0b2', wht:'#eef0f2', drk:'#2a2e35', met:'#9aa0a8', black:'#1f2329', green:'#4f7a4a', steel:'#b8bdc4', rug:'#6d7f95', lamp:'#ffe9c0', glassc:'#cfe6f2' };
-function floorKind(t: string): string { return (t === 'kitchen' || t === 'bathroom') ? 'tile' : t === 'garage' ? 'concrete' : t === 'bedroom' ? 'carpet' : 'wood'; }
+function floorKind(t: string, name = ''): string {
+  if (t === 'kitchen' || t === 'bathroom' || (t === 'room' && /ensuite|laundry|utility|powder|\bwc\b/i.test(name))) return 'tile';
+  return t === 'garage' ? 'concrete' : t === 'bedroom' ? 'carpet' : 'wood';
+}
 
 interface Opening { c: number; w: number; kind: 'door' | 'window'; interior?: boolean; }
+
+/** Split an axis-aligned surface into non-overlapping rectangles around a hole.
+ * This keeps the scene renderer/exporter on simple boxes while creating a real
+ * stairwell void through floor finishes, structural underlay and ceilings. */
+function subtractRect(base: Rect, hole: Rect | null): Rect[] {
+  if (!hole) return [base];
+  const bx1 = base.x + base.w, by1 = base.y + base.h;
+  const ix0 = Math.max(base.x, hole.x), iy0 = Math.max(base.y, hole.y);
+  const ix1 = Math.min(bx1, hole.x + hole.w), iy1 = Math.min(by1, hole.y + hole.h);
+  const E = 1e-4;
+  if (ix1 - ix0 <= E || iy1 - iy0 <= E) return [base];
+
+  const pieces: Rect[] = [
+    { x: base.x, y: base.y, w: base.w, h: iy0 - base.y },
+    { x: base.x, y: iy1, w: base.w, h: by1 - iy1 },
+    { x: base.x, y: iy0, w: ix0 - base.x, h: iy1 - iy0 },
+    { x: ix1, y: iy0, w: bx1 - ix1, h: iy1 - iy0 }
+  ];
+  return pieces.filter(p => p.w > E && p.h > E);
+}
 
 export function describeHouse(L: Layout, cfg: Spec): SceneDescription {
   const P = STYLES[cfg.style] || STYLES.modern;
@@ -37,6 +60,32 @@ export function describeHouse(L: Layout, cfg: Spec): SceneDescription {
   }
   function col(fl: number, a: number, b: number, c1: number, d1: number): void {
     collision.push({ floor: fl, minX: Math.min(a, b), maxX: Math.max(a, b), minZ: Math.min(c1, d1), maxZ: Math.max(c1, d1) });
+  }
+  function horizontalSurface(t: 'underlay' | 'floor' | 'ceil', rect: Rect, hole: Rect | null, y: number, h: number, color: string, tex: string | null, fl: number): void {
+    subtractRect(rect, hole).forEach(piece => {
+      box(t, WX(piece.x + piece.w / 2), y, WZ(piece.y + piece.h / 2), piece.w, h, piece.h, color, tex, fl);
+    });
+  }
+
+  /** Three-sided guard at the upper landing. The stair rises toward +y, so the
+   * front (+y) edge stays open while the other edges receive rails and posts. */
+  function stairGuard(st: Rect, yBase: number, fl: number, color: string): void {
+    const rail = 0.065, guardH = 0.95;
+    const x0 = WX(st.x), x1 = WX(st.x + st.w);
+    const z0 = WZ(st.y), z1 = WZ(st.y + st.h);
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+    const railY = yBase + guardH - rail / 2;
+
+    box('trim', x0, railY, cz, rail, rail, Math.max(rail, st.h), color, null, fl);
+    box('trim', x1, railY, cz, rail, rail, Math.max(rail, st.h), color, null, fl);
+    box('trim', cx, railY, z0, Math.max(rail, st.w), rail, rail, color, null, fl);
+
+    const sideSegments = Math.max(1, Math.ceil(st.h / 1.1));
+    for (let i = 0; i <= sideSegments; i++) {
+      const z = z0 + (z1 - z0) * (i / sideSegments);
+      box('trim', x0, yBase + guardH / 2, z, rail, guardH, rail, color, null, fl);
+      box('trim', x1, yBase + guardH / 2, z, rail, guardH, rail, color, null, fl);
+    }
   }
 
   // ground, foundation, plinth, front path
@@ -134,15 +183,20 @@ export function describeHouse(L: Layout, cfg: Spec): SceneDescription {
 
   for (let fi = 0; fi < L.floors.length; fi++) {
     const fl = L.floors[fi], yB = fi * (WALLH + SLAB), F = L.foot;
-    // full-footprint underlay so AI plans with imperfect coverage never show holes
-    box('underlay', 0, yB - SLAB / 2 - 0.006, 0, F.w + 0.02, SLAB, F.h + 0.02, P.wood, 'wood', fi);
+    // Ground rests on a full slab. Each upper level is split around the stair
+    // arriving from below, preserving fallback coverage without sealing the void.
+    const arrivalOpening = fi > 0 ? (L.floors[fi - 1].stairs || null) : null;
+    const underlayRect = { x: F.x - 0.01, y: F.y - 0.01, w: F.w + 0.02, h: F.h + 0.02 };
+    horizontalSurface('underlay', underlayRect, arrivalOpening, yB - SLAB / 2 - 0.006, SLAB, P.wood, 'wood', fi);
     fl.rooms.forEach(rm => {
-      const k = rm.type === 'corridor' ? 'wood' : floorKind(rm.type);
-      box('floor', WX(rm.x + rm.w / 2), yB - SLAB / 2, WZ(rm.y + rm.h / 2), rm.w, SLAB, rm.h, (P as unknown as Record<string, string>)[k], k, fi);
+      const k = rm.type === 'corridor' ? 'wood' : floorKind(rm.type, rm.name);
+      horizontalSurface('floor', rm, arrivalOpening, yB - SLAB / 2, SLAB, (P as unknown as Record<string, string>)[k], k, fi);
       if (rm.type !== 'corridor') { furnish(rm, yB, fi); lamp(rm, yB, fi); decor(rm, yB, fi); dress(rm, yB, fi); }
       else lamp(rm, yB, fi);
     });
-    box('ceil', 0, yB + WALLH + SLAB / 2, 0, F.w, SLAB, F.h, '#f4f4f2', null, fi);
+    const departureOpening = fi < L.floors.length - 1 ? (fl.stairs || null) : null;
+    horizontalSurface('ceil', F, departureOpening, yB + WALLH + SLAB / 2, SLAB, '#f4f4f2', null, fi);
+    if (arrivalOpening) stairGuard(arrivalOpening, yB, fi, P.trim);
 
     const ow: Record<'front' | 'back' | 'left' | 'right', Opening[]> = { front: [], back: [], left: [], right: [] };
     fl.rooms.forEach(rm => rm.windows.forEach(w => {
@@ -330,6 +384,37 @@ export function describeHouse(L: Layout, cfg: Spec): SceneDescription {
         P3(Math.min(1.9, w * 0.5), 0.55, Math.min(4.2, d * 0.72), '#3a4654', 0, 0, 0.5, null, 0, crs); P3(Math.min(1.65, w * 0.45), 0.5, Math.min(2.0, d * 0.34), '#222a33', 0, -d * 0.04, 1.0, null, 0, crs);
         MS(crs, 'Car', 0, 0, Math.min(1.9, w * 0.5), 1.4, Math.min(4.2, d * 0.72), 0);
         P3(Math.min(2.4, w * 0.7), 0.9, 0.4, FURN.drk, 0, backZ(0.4), 0.6, 'wood'); break; }
+      case 'room': {
+        const name = rm.name.toLowerCase();
+        if (/laundry|utility/.test(name)) {
+          P3(Math.min(w - 0.4, 2.5), 0.9, 0.62, FURN.wht, 0, backZ(0.62), 0.45);
+          P3(0.7, 0.86, 0.68, FURN.met, leftX(0.7), backZ(0.68), 0.43);
+          P3(0.7, 0.86, 0.68, FURN.met, rightX(0.7), backZ(0.68), 0.43);
+        } else if (/pantry|store/.test(name)) {
+          P3(Math.min(w - 0.4, 2.6), 2.1, 0.42, FURN.woodL, 0, backZ(0.42), 1.05, 'wood');
+          for (let sh = 0; sh < 4; sh++) P3(Math.min(w - 0.55, 2.4), 0.05, 0.5, FURN.wood, 0, backZ(0.5), 0.42 + sh * 0.45, 'wood');
+        } else if (/ensuite|powder|\bwc\b/.test(name)) {
+          const tos = 'toi' + rid;
+          P3(0.55, 0.45, 0.42, FURN.wht, rightX(0.42), backZ(0.55), 0.22, null, Math.PI / 2, tos);
+          MS(tos, 'Toilet', rightX(0.42), backZ(0.55), 0.42, 0.7, 0.55, Math.PI / 2);
+          P3(Math.min(0.9, w * 0.4), 0.82, 0.5, FURN.woodL, leftX(0.5), frontZ(0.7), 0.41, 'wood', Math.PI / 2);
+        } else if (/gym|fitness/.test(name)) {
+          rug(Math.min(w - 0.5, 2.2), Math.min(d - 0.5, 1.1), '#56636f');
+          P3(Math.min(1.6, w * 0.55), 0.45, 0.5, FURN.drk, 0, backZ(0.5), 0.3);
+          CY(0.28, 0.1, FURN.black, -0.75, 0.5, 0.08); CY(0.28, 0.1, FURN.black, 0.75, 0.5, 0.08);
+        } else if (/prayer|meditation/.test(name)) {
+          rug(Math.min(w - 0.6, 1.4), Math.min(d - 0.6, 2.1), '#8b6d4f');
+          P3(Math.min(w - 0.5, 1.8), 0.8, 0.32, FURN.wood, 0, backZ(0.32), 0.4, 'wood');
+        } else {
+          // Office/study/flex-room default: desk, storage and a circulation-safe chair.
+          const deskW = Math.min(w - 0.5, 1.8), chairSlot = 'flexchair' + rid;
+          P3(deskW, 0.74, 0.65, FURN.woodL, 0, backZ(0.65), 0.37, 'wood');
+          P3(Math.min(0.9, deskW * 0.55), 0.52, 0.05, FURN.black, 0, backZ(0.65) + 0.02, 1.05);
+          P3(0.52, 0.86, 0.52, FURN.drk, 0, backZ(0.65) + 1.0, 0.43, null, Math.PI, chairSlot);
+          MS(chairSlot, 'Chair', 0, backZ(0.65) + 1.0, 0.52, 0.9, 0.52, Math.PI);
+          P3(Math.min(1.6, w * 0.45), 1.9, 0.36, FURN.wood, rightX(0.36), 0, 0.95, 'wood', Math.PI / 2);
+        }
+        break; }
     }
   }
 }
