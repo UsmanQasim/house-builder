@@ -8,7 +8,6 @@
  *  - windows only on exterior walls
  *  - stairs occupy the same rect on every floor
  */
-import { PlanTemplates } from './plan-templates.js';
 import type { Door, Floor, Layout, RawPlan, Rect, Room, RoomType, Side, Spec, Validation } from './types.js';
 
 const DOOR = 0.9, FRONT = 1.2, WIN = 1.4, EPS = 0.02, OVERLAP_EPS = 1e-5;
@@ -317,72 +316,6 @@ function layoutUpper(c: Spec, fx: number, fy: number, fw: number, fh: number, fl
 
   applyWindows(floor.rooms, fx, fy, fw, fh);
   return { floor, corridorX, CW };
-}
-
-interface TplRoom { type: RoomType; name: string; x: number; y: number; w: number; h: number; door?: { side: Side; pos: number; rel?: boolean; width?: number } }
-
-function placeNorm(floor: Floor, s: TplRoom, fx: number, fy: number, fw: number, fh: number): Room {
-  const x = fx + s.x * fw, y = fy + s.y * fh, w = s.w * fw, h = s.h * fh;
-  const rm = mk(s.type, s.name, x, y, w, h);
-  if (s.door && s.door.side) {
-    const pos = s.door.rel
-      ? ((s.door.side === 'left' || s.door.side === 'right') ? y + s.door.pos * h : x + s.door.pos * w)
-      : (+s.door.pos || x + w / 2);
-    setDoor(rm, s.door.side, pos, s.door.width);
-  }
-  floor.rooms.push(rm);
-  return rm;
-}
-
-export function buildFromTemplate(c: Spec, templateId: string): Layout | null {
-  const PT = PlanTemplates;
-  const tpl = PT.CATALOG[templateId] || PT.CATALOG[PT.pickTemplate(c)];
-  if (!tpl) return null;
-  const { fw, fh, fx, fy } = sizedFootprint(c);
-  if (tpl.floors.length !== c.floors) return null;
-
-  const floors: Floor[] = [];
-  let corridorX = fx + fw / 2 - 0.6, CW = 1.25;
-  let bedCount = 0, bathCount = 0; // global across floors so counts are exact
-  for (let fi = 0; fi < tpl.floors.length; fi++) {
-    const src = tpl.floors[fi];
-    const floor: Floor = { index: fi, rooms: [], corridor: null, entrance: null, stairs: null };
-    src.rooms.forEach(s0 => {
-      let s = s0 as TplRoom;
-      if (s.type === 'bedroom') { bedCount++; if (bedCount > c.bedrooms) return; s = { ...s, name: bedCount === 1 ? 'Master Bedroom' : 'Bedroom ' + bedCount }; }
-      if (s.type === 'bathroom') { bathCount++; if (bathCount > c.bathrooms) return; }
-      if (s.type === 'kitchen' && c.kitchens < 1) return;
-      if (s.type === 'dining' && !c.dining) return;
-      if (s.type === 'garage' && !c.garage) return;
-      placeNorm(floor, s, fx, fy, fw, fh);
-    });
-    if (src.corridor) {
-      const cr = src.corridor;
-      floor.corridor = { x: fx + cr.x * fw, y: fy + cr.y * fh, w: cr.w * fw, h: cr.h * fh };
-      corridorX = floor.corridor.x; CW = floor.corridor.w;
-    }
-    if (src.entrance) {
-      const en = src.entrance;
-      floor.entrance = { x: fx + en.x * fw, y: fy + fh, width: en.width || FRONT };
-    }
-    if (src.stairs && fi < c.floors - 1) {
-      const st = src.stairs;
-      floor.stairs = { x: fx + st.x * fw, y: fy + st.y * fh, w: st.w * fw, h: st.h * fh };
-    }
-    applyWindows(floor.rooms, fx, fy, fw, fh);
-    floors.push(floor);
-  }
-  const layout: Layout = {
-    plotW: c.plotW, plotD: c.plotD, foot: { x: fx, y: fy, w: fw, h: fh },
-    corridorX, CW, floors, partitions: true,
-    planSource: 'template', templateId, planConcept: tpl.concept || ''
-  };
-  // Legacy templates historically omit the terminal landing. Keep this
-  // compatibility repair local to the template adapter; untrusted AI plans
-  // must prove their own stair alignment.
-  alignStairs(layout);
-  repair(layout, c);
-  return layout;
 }
 
 /* ----------------------------- validity engine ----------------------------- */
@@ -1035,13 +968,6 @@ export function computeLayout(c: Spec, seedOverride?: number): Layout {
     return chosen;
   }
 
-  // Templates remain compatibility-only and are never preferred over a valid
-  // generated candidate. They must pass the same strict validator to ship.
-  const tid = PlanTemplates.pickTemplate(c), template = buildFromTemplate(c, tid);
-  if (template && validateLayout(template, c).ok) {
-    template.planSeed = seed; template.planScore = validateLayout(template, c).score; template.planCandidates = attempts;
-    return template;
-  }
   if (bestAny) {
     bestAny.layout.planScore = Math.round(bestAny.quality * 10) / 10; bestAny.layout.planCandidates = attempts;
     return bestAny.layout;
@@ -1109,5 +1035,5 @@ export function fromAI(raw: RawPlan, c: Spec): Layout | null {
   return rep.validation.ok ? rep.layout : null;
 }
 
-export const HouseLayout = { computeLayout, buildFromTemplate, fromAI, fromAIReport, inferSpecFromPrompt, validateLayout, repair, coverage, MIN, MIN_COVERAGE };
+export const HouseLayout = { computeLayout, fromAI, fromAIReport, inferSpecFromPrompt, validateLayout, repair, coverage, MIN, MIN_COVERAGE };
 export default HouseLayout;

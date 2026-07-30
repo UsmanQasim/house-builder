@@ -1,13 +1,17 @@
-/* Bespoke AI floor-plan generation — a NEW plan is designed for every request.
- * The LLM acts as a residential architect; its output is parsed, repaired and
- * validated against hard architectural invariants. On violations it gets ONE
- * corrective round-trip with the exact issue list. Templates are only a
- * fallback when no key is configured or the AI fails twice. */
+/* Bespoke AI floor-plan generation. AI geometry gets one corrective attempt,
+ * then either passes every release check or returns a diagnostic rejection. */
 import { HouseLayout } from '../src/engine/layout.js';
 import type { Layout, RawPlan, Spec } from '../src/engine/types.js';
 import type { Provider } from './providers.js';
 
 export interface GeneratedPlan { layout: Layout; concept: string; attempts: number; coverage: number; score: number; }
+export interface PlanGenerationReport {
+  plan: GeneratedPlan | null;
+  attempts: number;
+  issues: string[];
+  coverage: number;
+  providerFailed: boolean;
+}
 interface Hit { title: string; snippet: string; }
 
 function footprintOf(spec: Spec): { fw: number; fh: number } {
@@ -43,7 +47,7 @@ function userPrompt(spec: Spec, research: Hit[], variation: number): string {
   return s;
 }
 
-export async function generateBespokePlan(P: Provider, spec: Spec, research: Hit[]): Promise<GeneratedPlan | null> {
+export async function generateBespokePlanReport(P: Provider, spec: Spec, research: Hit[]): Promise<PlanGenerationReport> {
   const { fw, fh } = footprintOf(spec);
   const sys = systemPrompt(spec, fw, fh);
   const variation = Math.floor(Math.random() * 1000);
@@ -51,18 +55,24 @@ export async function generateBespokePlan(P: Provider, spec: Spec, research: Hit
     { role: 'system', content: sys },
     { role: 'user', content: userPrompt(spec, research, variation) }
   ];
-  let best: GeneratedPlan | null = null;
+  let lastIssues: string[] = [];
+  let lastCoverage = 0;
 
   for (let attempt = 1; attempt <= 2; attempt++) {
     let raw: RawPlan;
     try {
       raw = await P.chatJSON<RawPlan>({ temperature: attempt === 1 ? 0.7 : 0.35, maxTokens: 3800, messages });
-    } catch { return best; }
+    } catch {
+      return { plan: null, attempts: attempt, issues: lastIssues, coverage: lastCoverage, providerFailed: true };
+    }
     const rep = HouseLayout.fromAIReport(raw, { ...spec, strictCounts: true });
+    lastIssues = rep.validation.issues.slice(0, 12);
+    lastCoverage = rep.coverage;
     if (rep.layout) {
       const cand: GeneratedPlan = { layout: rep.layout, concept: raw.concept || '', attempts: attempt, coverage: rep.coverage, score: rep.validation.score };
-      if (rep.validation.ok && rep.coverage >= 0.9) return cand;                  // only ship a genuinely complete plan
-      if (rep.validation.ok && (!best || rep.coverage > best.coverage)) best = cand; // valid but sparse — keep as candidate
+      if (rep.validation.ok && rep.coverage >= 0.9) {
+        return { plan: cand, attempts: attempt, issues: [], coverage: rep.coverage, providerFailed: false };
+      }
     }
     if (attempt === 1) {
       const issues = rep.validation.issues.slice(0, 12).join('; ') || 'coverage too low (rooms must tile the whole footprint)';
@@ -70,5 +80,10 @@ export async function generateBespokePlan(P: Provider, spec: Spec, research: Hit
       messages.push({ role: 'user', content: 'Your plan violated these machine-checked rules: ' + issues + '. Unique coverage was ' + Math.round(rep.coverage * 100) + '% (need >=90% of the footprint tiled with no overlaps). Produce a corrected plan that fixes every violation. Same JSON shape, nothing else.' });
     }
   }
-  return best;
+  return { plan: null, attempts: 2, issues: lastIssues, coverage: lastCoverage, providerFailed: false };
+}
+
+/** Backward-compatible helper used by focused generator tests. */
+export async function generateBespokePlan(P: Provider, spec: Spec, research: Hit[]): Promise<GeneratedPlan | null> {
+  return (await generateBespokePlanReport(P, spec, research)).plan;
 }

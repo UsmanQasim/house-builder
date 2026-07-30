@@ -34,7 +34,6 @@ export interface Layout {
   floors: Floor[];
   partitions: boolean;
   planSource?: string;
-  templateId?: string;
   planConcept?: string;
   planInspiration?: string;
   /** Reproducible seed used by the procedural candidate generator. */

@@ -1,7 +1,7 @@
 /* Bespoke plan generator: validate->retry->repair loop, tested with a mock provider. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateBespokePlan } from '../build/server/plan-generator.js';
+import { generateBespokePlan, generateBespokePlanReport } from '../build/server/plan-generator.js';
 import { HouseLayout } from '../build/src/engine/layout.js';
 
 const spec = { plotW: 10, plotD: 12, floors: 1, bedrooms: 2, bathrooms: 1, kitchens: 1, living: 1, dining: false, garage: false, style: 'modern' };
@@ -44,14 +44,18 @@ test('retries with violation feedback, then accepts the corrected plan', async (
   assert.ok(HouseLayout.validateLayout(out.layout, spec).ok);
 });
 
-test('returns null when AI fails both attempts so the server can use the validated planner', async () => {
+test('rejects invalid AI geometry without returning a substitute plan', async () => {
   const P = mockProvider([garbagePlan, garbagePlan]);
-  const out = await generateBespokePlan(P, spec, []);
-  assert.equal(out, null);
+  const report = await generateBespokePlanReport(P, spec, []);
+  assert.equal(report.plan, null);
+  assert.equal(report.providerFailed, false);
+  assert.equal(report.attempts, 2);
+  assert.ok(report.issues.length > 0);
 });
 
-test('provider exception never throws out of the generator', async () => {
+test('provider failure is reported without creating a substitute plan', async () => {
   const P = mockProvider(['throw']);
-  const out = await generateBespokePlan(P, spec, []);
-  assert.equal(out, null);
+  const report = await generateBespokePlanReport(P, spec, []);
+  assert.equal(report.plan, null);
+  assert.equal(report.providerFailed, true);
 });

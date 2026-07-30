@@ -32,13 +32,11 @@ npm start
 3. **Visualize** — inspect the accepted plan as a furnished, walkable Three.js model.
 4. **Present** — create plan/scene-conditioned images and export SVG, PNG or prototype GLB.
 
-The app does not spend AI credits on page load. If an AI geometry result fails validation, the interface clearly identifies the seeded constraint-planned result instead of pretending a fallback is AI-generated.
+The app does not spend AI credits on page load. It only opens a plan when AI-generated geometry passes validation. Failed or unavailable AI requests produce an error; no offline floor map is substituted.
 
 ## Floor planning
 
-The offline engine is a seeded procedural space planner, not a small catalog of reused plans. It evaluates multiple candidates and keeps the highest-scoring valid layout. A seed makes each result reproducible; a fresh generation produces a new variation.
-
-Even without an AI key, a conservative prompt interpreter applies explicit bedroom/bathroom/floor counts, supported style words, garage/dining choices and named spaces such as offices, laundries, pantries, prayer rooms and gyms before planning.
+Every user-facing floor plan comes from the configured AI planning model. The model receives the exact footprint, room program, minimum dimensions, circulation requirements and the client brief, then gets one corrective attempt when validation fails.
 
 The validator checks:
 
@@ -48,9 +46,9 @@ The validator checks:
 - doors placed on shared walls and exterior-only windows;
 - room minimums and sensible circulation width;
 - aligned, bounded multi-floor stairs;
-- candidate quality before a result is accepted.
+- at least 90% unique footprint coverage before a result is accepted.
 
-AI is useful for understanding the written brief and proposing geometry, but machine validation is the release gate. The deterministic planner remains fully usable without a provider key.
+The validator is a release gate, not a floor-plan generator. Invalid AI coordinates are rejected and their issues are returned to the interface so the user can revise the brief, room program or plot dimensions.
 
 ## AI providers
 

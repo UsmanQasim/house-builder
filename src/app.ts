@@ -1,5 +1,4 @@
 /* ForthHome Studio — plan-first client application. */
-import { HouseLayout } from './engine/layout.js';
 import { Viewer } from './engine/viewer.js';
 import type { CustomRoomRequest, Layout, Room, RoomType, Spec } from './engine/types.js';
 
@@ -17,9 +16,7 @@ interface PlanMeta {
   inspiration?: string;
   source?: string;
   hits?: number;
-  templateId?: string;
   planModel?: string;
-  fallbackReason?: string;
 }
 
 interface SavedVersion {
@@ -247,13 +244,8 @@ function showViewerMessage(message: string): void {
   host.append(box);
 }
 
-function isFallbackSource(source?: string): boolean {
-  const normalized = String(source || '').toLowerCase();
-  return ['pro-template', 'template', 'offline', 'fallback'].includes(normalized) || normalized.includes('procedural');
-}
-
 function setBusy(busy: boolean): void {
-  $button('generateBtn').disabled = busy;
+  $button('generateBtn').disabled = busy || !aiAvailable;
   $button('randomBtn').disabled = busy;
   $button('planImgBtn').disabled = busy;
   const revision = $button('reviseBtn');
@@ -289,63 +281,42 @@ async function generatePlan(revision?: string): Promise<void> {
     const base = cfg.prompt || 'Create a residential concept matching the structured requirements.';
     cfg.prompt = `${base}\nRevision request: ${revision.trim().slice(0, 800)}`;
   }
+  if (!aiAvailable) {
+    $('saveState').textContent = 'AI unavailable';
+    toast('AI planning is required. Check the provider connection and try again.');
+    return;
+  }
   setBusy(true);
   $('saveState').textContent = 'Designing…';
-  const useAI = $input('aiPlans').checked;
-  let fallbackReason = useAI ? '' : 'Offline planning was selected in the brief.';
   try {
-    if (useAI) {
-      try {
-        const response = await fetch('/api/ai/floor-plan', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(cfg), signal: controller.signal
-        });
-        const data = await response.json().catch(() => ({})) as Record<string, any>;
-        if (!response.ok || !data.layout) {
-          const failure = new Error(cleanText(data.error || data.hint || `Planning service returned ${response.status}.`)) as Error & { status?: number };
-          failure.status = response.status;
-          throw failure;
-        }
-        if (data.spec && typeof data.spec === 'object') {
-          applySpecToForm(data.spec as Partial<Spec>);
-          const prompt = cfg.prompt;
-          cfg = readForm();
-          if (prompt) cfg.prompt = prompt;
-        }
-        const source = cleanText(data.source || data.layout.planSource || 'ai-generated', 40);
-        if (isFallbackSource(source)) fallbackReason = cleanText(data.inspiration || 'The bespoke planning service was unavailable, so an offline concept was used.', 360);
-        applyLayout(data.layout as Layout, {
-          concept: cleanText(data.concept || data.layout.planConcept, 900),
-          inspiration: cleanText(data.inspiration || data.layout.planInspiration, 700), source,
-          hits: Number.isFinite(Number(data.researchHits)) ? Number(data.researchHits) : undefined,
-          templateId: cleanText(data.templateId || data.layout.templateId, 80),
-          planModel: cleanText(data.planModel, 80), fallbackReason
-        }, true);
-        toast(isFallbackSource(source) ? 'Offline concept ready — review the visible fallback note.' : 'Bespoke concept ready for plan review.');
-        return;
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        if ((error as { status?: number }).status === 422) {
-          $('saveState').textContent = 'Requirements need revision';
-          toast(errorMessage(error));
-          return;
-        }
-        fallbackReason = `The bespoke planning request did not complete: ${errorMessage(error)}`;
-      }
+    const response = await fetch('/api/ai/floor-plan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg), signal: controller.signal
+    });
+    const data = await response.json().catch(() => ({})) as Record<string, any>;
+    if (!response.ok || !data.layout) {
+      const details = [data.error, data.hint, ...(Array.isArray(data.issues) ? data.issues.slice(0, 3) : [])]
+        .map(value => cleanText(value, 220)).filter(Boolean).join(' ');
+      throw new Error(details || `AI planning returned ${response.status}.`);
     }
-    cfg = HouseLayout.inferSpecFromPrompt(cfg);
-    applySpecToForm(cfg);
-    const local = HouseLayout.computeLayout(cfg);
-    const validation = HouseLayout.validateLayout(local, { ...cfg, strictCounts: true });
-    if (!validation.ok) throw new Error('This room program does not fit the selected site. Increase the site, add a floor, or remove a requested space.');
-    applyLayout(local, {
-      concept: cleanText(local.planConcept, 900), inspiration: cleanText(local.planInspiration, 700),
-      source: local.planSource || 'procedural-optimized', templateId: cleanText(local.templateId, 80), fallbackReason
+    if (data.spec && typeof data.spec === 'object') {
+      applySpecToForm(data.spec as Partial<Spec>);
+      const prompt = cfg.prompt;
+      cfg = readForm();
+      if (prompt) cfg.prompt = prompt;
+    }
+    const source = cleanText(data.source || data.layout.planSource || 'ai-generated', 40);
+    applyLayout(data.layout as Layout, {
+      concept: cleanText(data.concept || data.layout.planConcept, 900),
+      inspiration: cleanText(data.inspiration || data.layout.planInspiration, 700), source,
+      hits: Number.isFinite(Number(data.researchHits)) ? Number(data.researchHits) : undefined,
+      planModel: cleanText(data.planModel, 80)
     }, true);
-    toast('Offline concept ready — review its limitations before continuing.');
+    toast('Validated AI plan ready for review.');
   } catch (error) {
-    toast(`Plan generation failed: ${errorMessage(error)}`);
-    $('saveState').textContent = 'Not saved';
+    if (controller.signal.aborted) return;
+    toast(`AI plan not created: ${errorMessage(error)}`);
+    $('saveState').textContent = 'AI plan rejected';
   } finally {
     if (sequence === generationSequence) {
       activeGeneration = null;
@@ -360,7 +331,6 @@ function applyLayout(next: Layout, meta: PlanMeta = {}, save = false): void {
   planMeta = {
     ...meta,
     source: meta.source || next.planSource || 'unknown',
-    templateId: meta.templateId || next.templateId,
     concept: meta.concept || next.planConcept,
     inspiration: meta.inspiration || next.planInspiration
   };
@@ -381,7 +351,10 @@ function versionId(): string {
 function loadStoredVersions(): SavedVersion[] {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') as SavedVersion[];
-    return Array.isArray(parsed) ? parsed.filter(v => v?.layout?.floors?.length && v?.spec).slice(0, 12) : [];
+    return Array.isArray(parsed) ? parsed.filter(v => {
+      const source = String(v?.meta?.source || v?.layout?.planSource || '').toLowerCase();
+      return v?.layout?.floors?.length && v?.spec && (source === 'ai-generated' || source === 'from-image');
+    }).slice(0, 12) : [];
   } catch { return []; }
 }
 
@@ -448,7 +421,6 @@ function startNewProject(): void {
   cfg = null; layout = null; planMeta = null; brief = null; currentFloor = 0; customRooms = [];
   enableProjectStages(false);
   $('planHost').replaceChildren();
-  $('fallbackNotice').hidden = true;
   restoreGalleryEmpty();
   renderCustomRoomChips();
   setStage('create');
@@ -693,21 +665,16 @@ function deriveQuality(next: Layout, spec: Spec): { score: number; checks: Quali
 function updatePlanInspector(): void {
   if (!layout || !cfg) return;
   const source = String(planMeta?.source || layout.planSource || 'unknown');
-  const fallback = isFallbackSource(source);
   const badge = $('provenanceBadge');
-  badge.classList.toggle('fallback', fallback);
-  badge.textContent = fallback ? 'Offline concept' : source === 'from-image' ? 'Plan interpretation' : 'Bespoke AI concept';
-  $('provenanceText').textContent = fallback
-    ? 'This version was selected from seeded local candidates. Explicit counts, styles and named spaces are honored; nuanced prose still needs your review.'
-    : source === 'from-image'
-      ? 'This concept was reconstructed from your uploaded image. Compare every room and dimension with the source before relying on it.'
-      : 'This version was drafted for the current brief. Its checks are shown below so you can review it before visualization.';
+  badge.classList.remove('fallback');
+  badge.textContent = source === 'from-image' ? 'AI plan interpretation' : 'Validated AI geometry';
+  $('provenanceText').textContent = source === 'from-image'
+    ? 'AI reconstructed this concept from your uploaded image. Compare every room and dimension with the source before relying on it.'
+    : 'AI generated this geometry for the current brief, then every visible release check passed before the plan was accepted.';
   const seedParts: string[] = [];
   if (Number.isFinite(Number(layout.planSeed))) seedParts.push(`Seed ${layout.planSeed}`);
   if (Number.isFinite(Number(layout.planCandidates))) seedParts.push(`${layout.planCandidates} candidates`);
   $('planSeed').textContent = seedParts.join(' · ');
-  $('fallbackNotice').hidden = !fallback;
-  $('fallbackNotice').textContent = fallback ? `${cleanText(planMeta?.fallbackReason || planMeta?.inspiration || 'Bespoke planning was unavailable, so an offline concept was used.', 450)} Review room counts and circulation before continuing.` : '';
   $('planTitle').textContent = `${$input('projectName').value.trim() || 'Untitled residence'} · Plan`;
   $('planSubtitle').textContent = `${cfg.bedrooms} bedrooms · ${cfg.bathrooms} bathrooms · ${layout.floors.length} floor${layout.floors.length === 1 ? '' : 's'} · review before visualization`;
   $('conceptText').textContent = cleanText(planMeta?.concept || layout.planConcept || 'No concept note was supplied.', 900);
@@ -803,10 +770,15 @@ async function checkAI(): Promise<void> {
     const verified = data.verified === true;
     aiAvailable = configured;
     badge.className = `service-badge ${verified ? 'online' : configured ? 'checking' : 'offline'}`;
-    badge.querySelector('span')!.textContent = verified ? 'Studio verified' : configured ? 'Studio configured' : 'Offline planning';
-    badge.title = verified ? 'The AI service has passed a live verification.' : configured ? 'AI credentials are configured but have not passed a live verification yet.' : 'Plans will use the clearly labelled offline concept engine.';
+    badge.querySelector('span')!.textContent = verified ? 'AI verified' : configured ? 'AI configured' : 'AI unavailable';
+    badge.title = verified ? 'The AI service has passed a live verification.' : configured ? 'AI credentials are configured; plan geometry must pass validation before it is shown.' : 'AI planning is required and no offline plan will be substituted.';
+    $button('generateBtn').disabled = !aiAvailable;
+    $button('planImgBtn').disabled = !aiAvailable;
   } catch {
-    aiAvailable = false; badge.className = 'service-badge offline'; badge.querySelector('span')!.textContent = 'Offline planning';
+    aiAvailable = false; badge.className = 'service-badge offline'; badge.querySelector('span')!.textContent = 'AI unavailable';
+    badge.title = 'The AI service could not be reached; plan generation is disabled.';
+    $button('generateBtn').disabled = true;
+    $button('planImgBtn').disabled = true;
   }
 }
 
@@ -1108,8 +1080,7 @@ function useConfirmedPlan(): void {
   const result = pendingUploadedPlan; pendingUploadedPlan = null;
   $<HTMLDialogElement>('planConfirmDialog').close('default');
   applyLayout(result.layout, {
-    concept: cleanText(result.concept, 900), source: result.source || 'from-image',
-    fallbackReason: result.source === 'from-image' ? '' : 'The uploaded source could not be reconstructed exactly.'
+    concept: cleanText(result.concept, 900), source: 'from-image'
   }, true);
   toast('Plan interpretation opened for review.');
 }

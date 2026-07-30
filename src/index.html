@@ -107,7 +107,7 @@
                     <label><input type="radio" name="style" value="industrial"><span><i class="style-swatch industrial"></i><strong>Industrial</strong><small>Brick · steel · open volume</small></span></label>
                   </div>
                 </fieldset>
-                <label class="check-field ai-choice"><input id="aiPlans" type="checkbox" checked><span><strong>Use bespoke AI planning when available</strong><small>Any offline fallback will be clearly labelled before you continue.</small></span></label>
+                <p class="concept-disclaimer">AI-generated geometry only. Plans that fail validation are rejected; no offline map is substituted.</p>
               </div>
             </details>
 
@@ -157,7 +157,6 @@
             <button id="planTo3dBtn" class="primary-compact" type="button">Accept &amp; visualize <span aria-hidden="true">→</span></button>
           </div>
         </div>
-        <div id="fallbackNotice" class="fallback-notice" role="alert" hidden></div>
         <div class="plan-workspace">
           <div class="canvas-column">
             <div class="canvas-bar"><div id="floorBar" class="floor-tabs" role="tablist" aria-label="Plan floors"></div><span class="canvas-note">Scroll or pinch to inspect · dimensions in metres</span></div>

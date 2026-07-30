@@ -4,8 +4,8 @@
  *   GET  /api/ai/status | /api/ai/diagnose | /api/plan-research | /api/reference-images
  *   GET  /api/texture | /api/model
  *   POST /api/ai/design-brief | /api/ai/floor-plan | /api/ai/plan-from-image | /api/ai/render
- * /api/ai/floor-plan returns a bespoke AI-generated plan when available, with
- * the validated seeded constraint planner as the reliable offline/failure fallback.
+ * /api/ai/floor-plan returns only validated AI-generated geometry. It never
+ * substitutes a local or template floor plan.
  */
 import http from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
@@ -15,14 +15,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { HouseLayout } from './src/engine/layout.js';
 import { PlanResearch } from './src/engine/plan-research.js';
-import { PlanTemplates } from './src/engine/plan-templates.js';
-import type { Layout, Spec } from './src/engine/types.js';
+import type { Spec } from './src/engine/types.js';
 import { getTextProvider, getImageProvider } from './server/providers.js';
 import {
   generateFurnitureGLB, isValidFurnitureGLB, MAX_FURNITURE_MODEL_BYTES,
   normalizeFurnitureType, rodinAvailable
 } from './server/model3d.js';
-import { generateBespokePlan } from './server/plan-generator.js';
+import { generateBespokePlanReport } from './server/plan-generator.js';
 import {
   boundedPositiveInteger, fetchWithTimeout, parseImageReference,
   readResponseBuffer, resolvePathWithin
@@ -124,7 +123,7 @@ async function withJsonBody(
 
 const provider = () => getTextProvider();
 const imageProvider = () => getImageProvider();
-const noKey = (res: ServerResponse) => json(res, 501, { error: 'AI is unavailable. Configure the selected provider key and set AI_OFFLINE=0. The validated procedural floor planner and 3D viewer still work offline.' });
+const noKey = (res: ServerResponse) => json(res, 503, { error: 'AI planning is unavailable. Configure a valid provider key and set AI_OFFLINE=0; no offline floor plan will be generated.' });
 
 interface RateBucket { started: number; count: number; }
 const aiBuckets = new Map<string, RateBucket>();
@@ -409,6 +408,7 @@ async function extractParams(spec: Spec): Promise<{ params?: Record<string, unkn
 
 async function aiFloorPlan(res: ServerResponse, body: Record<string, unknown>): Promise<void> {
   const P = provider();
+  if (!P.available()) return noKey(res);
   let spec = body as unknown as Spec;
   spec = sanitizeSpec(body, { plotW: 11, plotD: 13, floors: 2, bedrooms: 3, bathrooms: 2, kitchens: 1, living: 1, dining: true, garage: true, style: 'modern', prompt: typeof body.prompt === 'string' ? body.prompt : undefined });
   if (typeof body.prompt === 'string' && body.prompt.trim()) spec.prompt = body.prompt.trim();
@@ -427,40 +427,30 @@ async function aiFloorPlan(res: ServerResponse, body: Record<string, unknown>): 
     ? await planResearchWeb(spec)
     : { query: PlanResearch.researchQuery(spec), hits: [] as Hit[], webEnabled: false, engine: 'disabled' };
 
-  if (P.available()) {
-    const gen = await generateBespokePlan(P, spec, research.hits);
-    if (gen) {
-      return json(res, 200, {
-        layout: gen.layout,
-        spec: { plotW: spec.plotW, plotD: spec.plotD, floors: spec.floors, bedrooms: spec.bedrooms, bathrooms: spec.bathrooms, kitchens: spec.kitchens, living: spec.living, dining: spec.dining, garage: spec.garage, style: spec.style, seed: gen.layout.planSeed, customRooms: spec.customRooms || [] },
-        concept: promptConcept || gen.concept,
-        inspiration: 'Bespoke AI design (attempt ' + gen.attempts + ', ' + Math.round(gen.coverage * 100) + '% coverage, score ' + gen.score + ')',
-        researchQuery: research.query, researchHits: research.hits.length, researchEngine: research.engine,
-        source: 'ai-generated', planModel: PLAN_MODEL,
-        validation: HouseLayout.validateLayout(gen.layout, { ...spec, strictCounts: true })
-      });
-    }
-  }
-
-  // offline / AI-failed fallback
-  const layout: Layout = HouseLayout.computeLayout(spec);
-  const offlineValidation = HouseLayout.validateLayout(layout, { ...spec, strictCounts: true });
-  if (!offlineValidation.ok) {
-    return json(res, 422, {
-      error: 'This room program does not fit the selected footprint without compromising the plan.',
-      hint: 'Increase the buildable width/length, add a floor, or remove one of the requested spaces.',
-      issues: offlineValidation.issues.slice(0, 10),
-      source: 'rejected-procedural'
+  const report = await generateBespokePlanReport(P, spec, research.hits);
+  const gen = report.plan;
+  if (!gen) {
+    return json(res, report.providerFailed ? 502 : 422, {
+      error: report.providerFailed
+        ? 'The AI planning provider failed before producing valid geometry.'
+        : 'The AI plan did not pass the geometry release checks. No offline map was substituted.',
+      hint: report.providerFailed
+        ? 'Check provider diagnostics and retry.'
+        : 'Increase the plot or floor count, simplify the room program, or revise the brief and try again.',
+      issues: report.issues,
+      coverage: report.coverage,
+      attempts: report.attempts,
+      source: 'ai-rejected'
     });
   }
-  json(res, 200, {
-    layout,
-    spec: { plotW: spec.plotW, plotD: spec.plotD, floors: spec.floors, bedrooms: spec.bedrooms, bathrooms: spec.bathrooms, kitchens: spec.kitchens, living: spec.living, dining: spec.dining, garage: spec.garage, style: spec.style, seed: layout.planSeed, customRooms: spec.customRooms || [] },
-    concept: promptConcept || layout.planConcept || '',
-    inspiration: P.available() ? 'AI geometry was rejected — validated constraint-planned design used' : 'Validated offline constraint-planned design',
+  return json(res, 200, {
+    layout: gen.layout,
+    spec: { plotW: spec.plotW, plotD: spec.plotD, floors: spec.floors, bedrooms: spec.bedrooms, bathrooms: spec.bathrooms, kitchens: spec.kitchens, living: spec.living, dining: spec.dining, garage: spec.garage, style: spec.style, customRooms: spec.customRooms || [] },
+    concept: promptConcept || gen.concept,
+    inspiration: 'Validated bespoke AI geometry (attempt ' + gen.attempts + ', ' + Math.round(gen.coverage * 100) + '% coverage, score ' + gen.score + ')',
     researchQuery: research.query, researchHits: research.hits.length, researchEngine: research.engine,
-    source: 'procedural-optimized', planModel: PLAN_MODEL,
-    validation: offlineValidation
+    source: 'ai-generated', geometryMode: 'ai-generated-validated', planModel: PLAN_MODEL,
+    validation: HouseLayout.validateLayout(gen.layout, { ...spec, strictCounts: true })
   });
 }
 
@@ -601,7 +591,7 @@ http.createServer(async (req, res) => {
     textModel: TEXT_MODEL, planModel: PLAN_MODEL, imageModel: IMAGE_MODEL,
     bespokePlans: provider().available(),
     webSearch: 'duckduckgo-free', braveSearch: !!process.env.BRAVE_SEARCH_API_KEY,
-    aiFloorPlans: true, templates: PlanTemplates.listTemplates().length
+    aiFloorPlans: provider().available(), geometryMode: 'ai-generated-validated', offlineFloorPlans: false
   });
   if (req.method === 'GET' && u.pathname === '/api/ai/diagnose') return diagnose(res);
   if (req.method === 'GET' && u.pathname === '/api/plan-research') {
@@ -625,7 +615,7 @@ http.createServer(async (req, res) => {
   if (req.method === 'GET' && u.pathname === '/api/model') return model(res, u.searchParams.get('type') || '');
   serveStatic(req, res);
 }).listen(PORT, () => console.log('\n  ForthHome AI House Designer:  http://localhost:' + PORT +
-  '\n  Text/plans: ' + provider().id + ' | Images: ' + imageProvider().id + ' | Rodin 3D: ' + (rodinAvailable() ? 'on' : 'off') + ' — ' + (provider().available() ? ('key present — BESPOKE AI floor plans on (plans ' + PLAN_MODEL + ', text ' + TEXT_MODEL + ', images ' + IMAGE_MODEL + ')') : 'AI unavailable (validated seeded procedural planner active)') +
+  '\n  Text/plans: ' + provider().id + ' | Images: ' + imageProvider().id + ' | Rodin 3D: ' + (rodinAvailable() ? 'on' : 'off') + ' — ' + (provider().available() ? ('validated AI geometry required (plans ' + PLAN_MODEL + ', text ' + TEXT_MODEL + ', images ' + IMAGE_MODEL + ')') : 'AI unavailable — floor-plan generation disabled') +
   '\n  Static: ' + (fs.existsSync(path.join(DIST, 'index.html')) ? 'dist/ (built)' : 'dist/ MISSING — run npm run build') + '\n'))
   .on('error', (e: NodeJS.ErrnoException) => {
     if (e.code === 'EADDRINUSE') {
