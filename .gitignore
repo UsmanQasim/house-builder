@@ -6,4 +6,6 @@ node_modules/
 dist/
 build/
 *.log
-.DS_
+.DS_Store
+.fuse_hidden*
+_*

@@ -114,7 +114,10 @@
             <div id="generationProgress" class="generation-progress" role="status" aria-live="polite" hidden>
               <span class="spinner" aria-hidden="true"></span><div><strong id="generationTitle">Reading your brief</strong><small id="generationDetail">Preparing spatial requirements…</small></div>
             </div>
-            <button id="generateBtn" class="primary-action" type="submit"><span>Create plan</span><span aria-hidden="true">→</span></button>
+            <div class="create-actions-row">
+              <button id="generateBtn" class="primary-action" type="submit"><span>Create AI plan</span><span aria-hidden="true">→</span></button>
+              <button id="proceduralBtn" class="secondary-action instant-studio-btn" type="button" title="Run the 56-candidate deterministic spatial solver immediately without AI credits"><span>⚡ Instant Studio Draft (Procedural Solver)</span></button>
+            </div>
             <p class="concept-disclaimer">Concept design only. Confirm structure, codes and construction documentation with a licensed professional.</p>
           </form>
 
@@ -154,6 +157,8 @@
             <button id="aiPlanRenderBtn" class="tool-button" type="button">Presentation plan</button>
             <button id="dlSvg" class="tool-button" type="button">SVG</button>
             <button id="dlPng" class="tool-button" type="button">PNG</button>
+            <button id="dlJsonBtn" class="tool-button" type="button" title="Export full CAD & BOQ JSON">JSON</button>
+            <button id="dlReportBtn" class="tool-button strong" type="button" title="Print or save Client Proposal & Cost Schedule PDF">Client Dossier PDF</button>
             <button id="planTo3dBtn" class="primary-compact" type="button">Accept &amp; visualize <span aria-hidden="true">→</span></button>
           </div>
         </div>
@@ -171,6 +176,22 @@
               <div class="quality-heading"><div><p class="eyebrow">Concept checks</p><h2>Plan quality</h2></div><div id="qualityScore" class="quality-score" aria-label="Plan quality score"><strong>—</strong><span>/100</span></div></div>
               <ul id="qualityChecks" class="quality-checks"></ul>
               <p class="quality-note">Automated concept checks are not a structural, code or construction review.</p>
+            </section>
+            <section class="inspector-card estimate-card">
+              <div class="quality-heading">
+                <div><p class="eyebrow">BOQ &amp; Area Takeoff</p><h2>Cost Estimate</h2></div>
+                <strong id="estimateTotalBadge" class="estimate-total-badge">—</strong>
+              </div>
+              <div class="estimate-controls">
+                <label><span>Market</span><select id="costMarket"><option value="us">USA (USD)</option><option value="uk">UK (GBP)</option><option value="ae">UAE (AED)</option><option value="pk">Pakistan (PKR)</option></select></label>
+                <label><span>Finish Tier</span><select id="finishTier"><option value="essential">Essential</option><option value="signature" selected>Signature</option><option value="bespoke">Bespoke</option></select></label>
+              </div>
+              <div id="estimateMetrics" class="estimate-metrics"></div>
+              <div id="boqBreakdown" class="boq-breakdown"></div>
+              <details class="schedule-details">
+                <summary>Room-by-room schedule (<span id="scheduleRoomCount">0</span> spaces)</summary>
+                <div id="roomScheduleTable" class="room-schedule-wrap"></div>
+              </details>
             </section>
             <section class="inspector-card concept-card">
               <p class="eyebrow">Design rationale</p><h2>Concept</h2><p id="conceptText">No concept note was supplied.</p><p id="inspirationText" class="muted-copy"></p>

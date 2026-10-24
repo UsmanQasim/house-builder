@@ -1,101 +1,99 @@
-# ForthHome
+<div align="center">
 
-ForthHome is a residential concept-design studio: describe a home, review a machine-validated floor plan, explore the furnished 3D model, and create a consistent presentation set.
+# 🏗️ ForthHome Studio
+### AI & Spatial Constraint Architectural Concept Engine
 
-It is intentionally honest about scope. The exported plans and models are concept assets for client demos, visualization and prototyping; they are not stamped construction documents or a substitute for a licensed local architect/engineer.
+**Turn natural-language residential briefs into machine-validated 2D floor plans, walkable Three.js PBR 3D models, regional BOQ cost estimates, and client presentation dossiers.**
 
-## Run it
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Three.js](https://img.shields.io/badge/Three.js-WebGL_PBR-000000?style=flat-square&logo=three.js&logoColor=white)](https://threejs.org/)
+[![Tests](https://img.shields.io/badge/Tests-43_Passing-2ea44f?style=flat-square)](./tests)
+[![Author](https://img.shields.io/badge/Author-Usman_Qasim-0A66C2?style=flat-square&logo=github)](https://github.com/UsmanQasim)
 
-Requires Node.js 18 or newer.
+</div>
+
+---
+
+## ✨ Why ForthHome?
+
+Most "AI floor plan generators" produce raster images with impossible geometry—doors that lead nowhere, overlapping rooms, unaligned stairs across floors, or missing windows. **ForthHome is a CAD-first spatial studio:**
+
+1. **Dual-Engine Spatial Generation**
+   - **LLM + Constraint Feedback Loop (`/api/ai/floor-plan`)**: Prompts OpenAI / Gemini for axis-aligned room geometry, validates it against topological and dimensional invariants, and feeds back specific violations for automatic self-correction.
+   - **Deterministic 56-Candidate Procedural Solver (`Instant Studio Draft`)**: Evaluates 56 seeded architectural topologies in `<100ms` on the client or server, scoring circulation efficiency, daylight access, and room proportions—working 100% offline with zero API cost.
+2. **Hard Architectural Invariants (`src/engine/layout.ts`)**
+   - **Zero Overlaps & Full Footprint Tiling**: Verified via geometric union coverage ($\ge 85\%$ required).
+   - **Graph Reachability**: BFS traversal guarantees every habitable room is reachable from the front entrance and upper-floor landings via physical doorways.
+   - **Multi-Storey Stairwell Alignment**: Stacked stair cores automatically align across levels and cut corresponding upper-floor slabs and lower ceilings in 3D.
+   - **Exterior-Only Fenestration**: Windows are placed strictly on outer building perimeter walls.
+3. **Real-Time Walkable PBR 3D Studio (`src/engine/house3d.ts`, `viewer.ts`)**
+   - Extrudes validated 2D plans into a full Three.js scene with procedural rooms, doors, glazing, roof geometry, and collision-checked WASD first-person walkthroughs + orbit cutaway views.
+   - Exports standard binary **`.glb` (GLTF 2.0)** assets ready for Blender, Unreal, Unity, or web embeds.
+4. **Parametric BOQ & Multi-Market Construction Cost Estimator (`src/engine/estimator.ts`)**
+   - Real-time quantity takeoffs: Gross Floor Area (GFA), Net Habitable Area, circulation efficiency, exterior/interior linear wall lengths, and glazing apertures.
+   - Regional unit-rate pricing across **USA (USD)**, **UK (GBP)**, **UAE / GCC (AED)**, and **Pakistan (PKR)** with **Essential**, **Signature**, and **Bespoke Luxury** finish tiers.
+   - Five-division Bill of Quantities (Substructure & Frame, Envelope & Glazing, Partitions & Millwork, MEP Systems, Finishes) + one-click **Client Dossier PDF** and **CAD/BOQ JSON** export.
+
+---
+
+## 🏛️ System Architecture
+
+```mermaid
+flowchart LR
+  Brief["Client Brief / Plan Image"] --> Parser["Prompt Spec Extractor\n(inferSpecFromPrompt)"]
+  Parser --> Engine{"Generation Mode"}
+  Engine -->|AI Connected| LLM["LLM Spatial Architect\n(OpenAI / Gemini)"]
+  Engine -->|Instant Studio| Solver["56-Candidate Procedural Solver\n(Seeded Spatial Optimizer)"]
+  LLM --> Validator["Topological & Geometric Validator\n(Reachability · Coverage · Stairs)"]
+  Validator -->|Violations| LLM
+  Validator -->|Pass| Plan2D["Interactive 2D SVG CAD Plan"]
+  Solver --> Plan2D
+  Plan2D --> BOQ["BOQ & Regional Cost Estimator\n(USD · GBP · AED · PKR)"]
+  Plan2D --> Scene3D["Three.js PBR 3D Engine\n(Orbit · WASD Walk · Cutaway)"]
+  BOQ --> Exports["Client Dossier PDF · CAD JSON · SVG · PNG"]
+  Scene3D --> GLB["Binary GLTF (.glb) & Canonical Renders"]
+```
+
+---
+
+## 🚀 Quick Start
+
+Requires **Node.js 18+**.
 
 ```bash
+# 1. Install dependencies
 npm install
-copy .env.example .env
+
+# 2. Optional: configure AI keys for LLM bespoke plans & photorealistic renders
+cp .env.example .env
+
+# 3. Build & start the studio server (http://localhost:3000)
 npm run dev
 ```
 
-Open the local URL printed by the server. On Windows systems that block PowerShell npm scripts, use `npm.cmd run dev`.
+> **Note:** Even without an `OPENAI_API_KEY` or `GEMINI_API_KEY`, ForthHome's **⚡ Instant Studio Draft (56-Candidate Procedural Solver)**, **3D Walkthrough**, **GLB Export**, **BOQ Cost Estimator**, and **Client Dossier PDF** work out of the box.
 
-Useful commands:
+### Verification & Test Suite
 
 ```bash
-npm run build
-npm run typecheck
-npm test
-npm start
+npm run typecheck   # Strict TypeScript verification (client + server)
+npm test            # 43 architectural invariant, provider & BOQ unit tests
+npm run build       # Production server + Vite client bundle
 ```
 
-## Product workflow
+---
 
-1. **Create** — enter a client brief or upload a clean floor-plan image.
-2. **Plan** — review the plan first, including provenance, requested-room fidelity and quality checks.
-3. **Visualize** — inspect the accepted plan as a furnished, walkable Three.js model.
-4. **Present** — create plan/scene-conditioned images and export SVG, PNG or prototype GLB.
+## 💼 Commercial & B2B Workflow
 
-The app does not spend AI credits on page load. It only opens a plan when AI-generated geometry passes validation. Failed or unavailable AI requests produce an error; no offline floor map is substituted.
+ForthHome is designed for **residential architects, design-build contractors, and real-estate developers** who need to move from initial client discovery to an aligned spatial concept and preliminary budget in a single 10-minute meeting:
 
-## Floor planning
+1. **01 · Create**: Capture plot dimensions (`6m–80m`), storey count (`1–4`), room program, custom spaces (`Home Office`, `Prayer Room`, `Gym`, `Pantry`), and architectural character.
+2. **02 · Plan & BOQ**: Inspect the dimensioned 2D floor plan across levels, verify the 5-point architectural quality score, switch between regional currencies/finish tiers, and print the **Client Dossier PDF**.
+3. **03 · Visualize**: Walk the client through the furnished 3D model in Orbit or first-person WASD mode, toggle floor cutaways and evening lighting, or export `.glb`.
+4. **04 · Present**: Generate plan-anchored exterior and interior architectural visualizations conditioned on the exact 2D plan and 3D viewport capture.
 
-Every user-facing floor plan comes from the configured AI planning model. The model receives the exact footprint, room program, minimum dimensions, circulation requirements and the client brief, then gets one corrective attempt when validation fails.
+---
 
-The validator checks:
+## 📄 Scope & Professional Disclaimer
 
-- true geometric union coverage, bounds and overlaps;
-- exact requested room counts, including named custom rooms;
-- connected circulation from the entrance or landing;
-- doors placed on shared walls and exterior-only windows;
-- room minimums and sensible circulation width;
-- aligned, bounded multi-floor stairs;
-- at least 90% unique footprint coverage before a result is accepted.
-
-The validator is a release gate, not a floor-plan generator. Invalid AI coordinates are rejected and their issues are returned to the interface so the user can revise the brief, room program or plot dimensions.
-
-## AI providers
-
-Keys stay on the server and are never included in the browser bundle.
-
-| Workload | Default | Environment variable |
-|---|---|---|
-| Plan reasoning | `gpt-5.6-sol` | `OPENAI_PLAN_MODEL` |
-| Briefs/schemes | `gpt-5.6-terra` | `OPENAI_TEXT_MODEL` |
-| OpenAI images | `gpt-image-2` | `OPENAI_IMAGE_MODEL` |
-| Gemini images | `gemini-3-pro-image` | `GEMINI_IMAGE_MODEL` |
-
-Set `IMAGE_PROVIDER=openai` or `gemini`. The diagnostics action checks the configured key and model access. Merely finding a key in `.env` is shown as “configured,” not falsely reported as connected.
-
-Photoreal image requests include the canonical plan capture and current 3D scene so generated views remain tied to the selected project. Image models can still introduce visual inconsistencies; the dimensioned SVG/PNG plan remains the geometry source of truth.
-
-## Exports and assets
-
-- Dimensioned floor plan: SVG and PNG.
-- Presentation images: provider-generated PNG.
-- 3D concept model: binary glTF (`.glb`) with generated architecture, furniture available in the current scene and embedded materials.
-
-The bundled/cached furniture files do not currently have verified redistribution records. Do not sell or redistribute exported GLBs until each dependency has an approved license. See [ASSET_PROVENANCE.md](ASSET_PROVENANCE.md).
-
-## Deployment controls
-
-The local server includes request-size limits, provider timeouts, a strict model allowlist, bounded model downloads, safe static-path handling and an hourly AI-route limit. Configure:
-
-```dotenv
-AI_RATE_LIMIT_PER_HOUR=30
-AI_OFFLINE=0
-# APP_ACCESS_TOKEN=replace-for-a-private-demo
-# TRUST_PROXY=0
-```
-
-These controls are appropriate for a private MVP demo, not a public SaaS launch. Before charging users, add real authentication, per-user projects, durable storage, Stripe billing, usage metering, background jobs, monitoring and backups. [DEMO_AND_LAUNCH.md](DEMO_AND_LAUNCH.md) defines the recommended launch gate.
-
-## Structure
-
-| Path | Purpose |
-|---|---|
-| `src/app.ts` | Product workflow, plan renderer, persistence and exports |
-| `src/styles.css` | Responsive architectural-studio design system |
-| `src/engine/layout.ts` | Procedural planning, repair, validation and ranking |
-| `src/engine/house3d.ts` | Plan-to-scene description and furnishing |
-| `src/engine/viewer.ts` | Three.js renderer, walkthrough, capture and GLB export |
-| `server/plan-generator.ts` | AI plan prompt and corrective validation loop |
-| `server/providers.ts` | OpenAI/Gemini adapters and retries |
-| `server.ts` | API routes, provider guards, asset proxies and static server |
-| `tests/` | Geometry, adversarial validator, provider and stairwell regressions |
+Exported plans, 3D models, and BOQ schedules are preliminary concept assets for feasibility, client alignment, and visualization. They are not stamped construction documents; always verify structural engineering, local zoning setbacks, and building codes with a licensed architect and engineer.

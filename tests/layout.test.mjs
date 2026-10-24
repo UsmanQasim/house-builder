@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { HouseLayout } from '../build/src/engine/layout.js';
 import { describeHouse } from '../build/src/engine/house3d.js';
+import { computeProjectEstimate, formatMoney } from '../build/src/engine/estimator.js';
 
 const SPECS = [
   { plotW: 11, plotD: 13, floors: 2, bedrooms: 3, bathrooms: 2, kitchens: 1, living: 1, dining: true, garage: true, style: 'modern' },
@@ -227,4 +228,19 @@ test('offline prompt hints preserve structured values when prose is not explicit
   assert.equal(inferred.bedrooms, 3);
   assert.equal(inferred.floors, 2);
   assert.deepEqual(inferred.customRooms.map(room => room.name), ['Office']);
+});
+
+test('computeProjectEstimate calculates accurate areas, takeoffs, and multi-market BOQ', () => {
+  const spec = SPECS[0];
+  const L = HouseLayout.computeLayout(spec, 42);
+  const estUS = computeProjectEstimate(L, spec, 'us', 'signature');
+  const estPK = computeProjectEstimate(L, spec, 'pk', 'bespoke');
+
+  assert.ok(estUS.grossFloorAreaM2 > 120, 'gross floor area is positive');
+  assert.ok(estUS.netHabitableAreaM2 > 60, 'net habitable area is positive');
+  assert.ok(estUS.efficiencyPct >= 50 && estUS.efficiencyPct <= 98, 'efficiency is realistic');
+  assert.equal(estUS.boqLines.length, 5, 'five BOQ trade divisions');
+  assert.ok(estUS.totalProjectBudget > estUS.hardConstructionCost, 'total budget includes soft costs and contingency');
+  assert.ok(estPK.totalProjectBudget > estUS.totalProjectBudget * 20, 'PKR regional rate scales appropriately');
+  assert.ok(formatMoney(estUS.totalProjectBudget, estUS.market).startsWith('$'), 'USD currency symbol formatted');
 });
