@@ -798,9 +798,21 @@ function allocatedSegments(rooms: ProgramRoom[], cross: number, total: number, r
     return Math.max(0.18, r.targetArea / cross - (needs[i] as number)) + 0.15 + rng() * 0.3;
   });
   const weightSum = weights.reduce((s, n) => s + n, 0);
-  const out = ordered.map((room, i) => ({ room, length: (needs[i] as number) + extra * weights[i] / weightSum }));
-  // Absorb floating-point drift in the final segment so the footprint tiles exactly.
-  out[out.length - 1].length += total - out.reduce((s, x) => s + x.length, 0);
+  const out = ordered.map((room, i) => {
+    const raw = (needs[i] as number) + extra * weights[i] / weightSum;
+    if (room.type === 'bathroom') {
+      const cap = Math.max((needs[i] as number) + 0.35, Math.min(3.1, 11.8 / Math.max(1.5, cross)));
+      return { room, length: Math.min(raw, cap) };
+    }
+    return { room, length: raw };
+  });
+  // Absorb any leftover length into a non-bathroom room, or leave >1.25m for a gallery when only bathrooms exist.
+  const nonBath = out.filter(x => x.room.type !== 'bathroom');
+  const leftover = total - out.reduce((s, x) => s + x.length, 0);
+  if (Math.abs(leftover) > 1e-6) {
+    if (nonBath.length) nonBath[nonBath.length - 1].length += leftover;
+    else if (leftover <= 1.25) out[out.length - 1].length += leftover;
+  }
   return out;
 }
 
@@ -833,9 +845,17 @@ function verticalFloor(fi: number, assigned: ProgramRoom[], c: Spec, foot: Rect,
   const left = allocatedSegments(split[0], leftW, foot.h, rng, true), right = allocatedSegments(split[1], rightW, foot.h, rng, true);
   if (!left || !right) return null;
   if (!left.length) addOpenCorridor(floor, 'West Gallery', foot.x, foot.y, leftW, foot.h, 'right');
-  else { let y = foot.y; left.forEach(s => { addProgramRoom(floor, s.room, foot.x, y, leftW, s.length, 'right'); y += s.length; }); }
+  else {
+    let y = foot.y;
+    left.forEach(s => { addProgramRoom(floor, s.room, foot.x, y, leftW, s.length, 'right'); y += s.length; });
+    if (foot.y + foot.h - y > 1.2) addOpenCorridor(floor, 'West Gallery', foot.x, y, leftW, foot.y + foot.h - y, 'right');
+  }
   if (!right.length) addOpenCorridor(floor, 'East Gallery', hallX + cw, foot.y, rightW, foot.h, 'left');
-  else { let y = foot.y; right.forEach(s => { addProgramRoom(floor, s.room, hallX + cw, y, rightW, s.length, 'left'); y += s.length; }); }
+  else {
+    let y = foot.y;
+    right.forEach(s => { addProgramRoom(floor, s.room, hallX + cw, y, rightW, s.length, 'left'); y += s.length; });
+    if (foot.y + foot.h - y > 1.2) addOpenCorridor(floor, 'East Gallery', hallX + cw, y, rightW, foot.y + foot.h - y, 'left');
+  }
   if (fi === 0) floor.entrance = { x: hallX + cw / 2, y: foot.y + foot.h, width: FRONT };
   if (c.floors > 1) floor.stairs = { x: hallX + 0.1, y: foot.y + 0.25, w: cw - 0.2, h: Math.min(2.7, foot.h - 0.5) };
   applyWindows(floor.rooms, foot.x, foot.y, foot.w, foot.h);
@@ -857,10 +877,18 @@ function horizontalFloor(fi: number, assigned: ProgramRoom[], c: Spec, foot: Rec
   const bottom = allocatedSegments(split[1], bottomH, foot.w - entryW, rng, false);
   if (!top || !bottom) return null;
   if (!top.length) addOpenCorridor(floor, 'North Gallery', foot.x, foot.y, foot.w, topH, 'bottom');
-  else { let x = foot.x; top.forEach(s => { addProgramRoom(floor, s.room, x, foot.y, s.length, topH, 'bottom'); x += s.length; }); }
+  else {
+    let x = foot.x;
+    top.forEach(s => { addProgramRoom(floor, s.room, x, foot.y, s.length, topH, 'bottom'); x += s.length; });
+    if (foot.x + foot.w - x > 1.2) addOpenCorridor(floor, 'North Gallery', x, foot.y, foot.x + foot.w - x, topH, 'bottom');
+  }
   const bottomX = entryLeft ? foot.x + entryW : foot.x;
   if (!bottom.length) addOpenCorridor(floor, 'South Gallery', bottomX, hallY + cw, foot.w - entryW, bottomH, 'top');
-  else { let x = bottomX; bottom.forEach(s => { addProgramRoom(floor, s.room, x, hallY + cw, s.length, bottomH, 'top'); x += s.length; }); }
+  else {
+    let x = bottomX;
+    bottom.forEach(s => { addProgramRoom(floor, s.room, x, hallY + cw, s.length, bottomH, 'top'); x += s.length; });
+    if (bottomX + (foot.w - entryW) - x > 1.2) addOpenCorridor(floor, 'South Gallery', x, hallY + cw, bottomX + (foot.w - entryW) - x, bottomH, 'top');
+  }
   if (fi === 0) floor.entrance = { x: entryX + entryW / 2, y: foot.y + foot.h, width: Math.min(FRONT, entryW - 0.1) };
   if (c.floors > 1) floor.stairs = { x: entryX + 0.1, y: hallY + cw + 0.12, w: entryW - 0.2, h: bottomH - 0.24 };
   applyWindows(floor.rooms, foot.x, foot.y, foot.w, foot.h);

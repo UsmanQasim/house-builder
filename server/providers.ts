@@ -136,8 +136,8 @@ export const OpenAIProvider: Provider = {
       }
       const ids = (data.data || []).map(x => x.id);
       const textModel = OPENAI_PLAN_MODEL();
-      const hasText = ids.includes(textModel) || ids.includes(textModel.replace(/-sol$/, ''));
-      const hasImg = ids.includes(OPENAI_IMAGE_MODEL());
+      const hasText = ids.includes(textModel) || ids.includes(textModel.replace(/-sol$/, '')) || ids.includes('gpt-4o');
+      const hasImg = ids.includes(OPENAI_IMAGE_MODEL()) || ids.includes('gpt-image-1') || ids.includes('dall-e-3');
       return { ok: hasText && hasImg, keyValid: true, textModelAvailable: hasText, imageModelAvailable: hasImg, imageModel: OPENAI_IMAGE_MODEL(),
         message: 'OpenAI key valid. Plans: ' + (hasText ? textModel + ' ready' : textModel + ' unavailable') +
           '. Renders: ' + (hasImg ? OPENAI_IMAGE_MODEL() + ' ready.' : OPENAI_IMAGE_MODEL() + ' unavailable for this project.') };
@@ -145,21 +145,34 @@ export const OpenAIProvider: Provider = {
   },
 
   async chatJSON<T>(opts: ChatOptions): Promise<T> {
-    const model = opts.model || OPENAI_PLAN_MODEL();
-    const isReasoningModel = /^gpt-5(?:\.|-|$)/.test(model);
-    const payload: Record<string, unknown> = {
-      model,
-      response_format: { type: 'json_object' },
-      messages: opts.messages
+    const buildPayload = (model: string): Record<string, unknown> => {
+      const isReasoningModel = /^gpt-5(?:\.|-|$)/.test(model);
+      const payload: Record<string, unknown> = {
+        model,
+        response_format: { type: 'json_object' },
+        messages: opts.messages
+      };
+      if (isReasoningModel) {
+        payload.reasoning_effort = reasoningEffort(model);
+        if (opts.maxTokens !== undefined) payload.max_completion_tokens = Math.max(boundedPositiveInteger(opts.maxTokens, 4000, 1, 128_000), 8000);
+      } else {
+        payload.temperature = opts.temperature ?? 0.3;
+        if (opts.maxTokens !== undefined) payload.max_tokens = boundedPositiveInteger(opts.maxTokens, 4000, 1, 128_000);
+      }
+      return payload;
     };
-    if (isReasoningModel) {
-      payload.reasoning_effort = reasoningEffort(model);
-      if (opts.maxTokens !== undefined) payload.max_completion_tokens = Math.max(boundedPositiveInteger(opts.maxTokens, 4000, 1, 128_000), 8000);
-    } else {
-      payload.temperature = opts.temperature ?? 0.3;
-      if (opts.maxTokens !== undefined) payload.max_tokens = boundedPositiveInteger(opts.maxTokens, 4000, 1, 128_000);
+    const primaryModel = opts.model || OPENAI_PLAN_MODEL();
+    let data: Record<string, unknown>;
+    try {
+      data = await withRetry(() => openaiPost('chat/completions', buildPayload(primaryModel)));
+    } catch (err) {
+      const status = (err as ApiError).status;
+      if ((status === 404 || status === 400 || status === 403) && primaryModel !== 'gpt-4o' && /model|exist|access|not_found/i.test(String((err as Error).message))) {
+        data = await withRetry(() => openaiPost('chat/completions', buildPayload('gpt-4o')));
+      } else {
+        throw err;
+      }
     }
-    const data = await withRetry(() => openaiPost('chat/completions', payload));
     const choices = data.choices as { message: { content: string } }[] | undefined;
     return JSON.parse((choices && choices[0] && choices[0].message.content) || '{}') as T;
   },
