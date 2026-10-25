@@ -115,8 +115,8 @@
               <span class="spinner" aria-hidden="true"></span><div><strong id="generationTitle">Reading your brief</strong><small id="generationDetail">Preparing spatial requirements…</small></div>
             </div>
             <div class="create-actions-row">
-              <button id="generateBtn" class="primary-action" type="submit"><span>Create AI plan</span><span aria-hidden="true">→</span></button>
-              <button id="proceduralBtn" class="secondary-action instant-studio-btn" type="button" title="Run the 56-candidate deterministic spatial solver immediately without AI credits"><span>⚡ Instant Studio Draft (Procedural Solver)</span></button>
+              <button id="generateBtn" class="primary-action" type="submit"><span>Create Plan &amp; 3D Studio</span><span aria-hidden="true">→</span></button>
+              <button id="proceduralBtn" class="secondary-action instant-studio-btn" type="button" title="Run the 72-candidate deterministic spatial solver immediately without AI credits"><span>⚡ Instant Variation (72-Candidate Solver)</span></button>
             </div>
             <p class="concept-disclaimer">Concept design only. Confirm structure, codes and construction documentation with a licensed professional.</p>
           </form>
@@ -154,6 +154,7 @@
         <div class="stage-toolbar">
           <div class="stage-title"><p class="eyebrow">Plan review</p><h1 id="planTitle">Concept plan</h1><p id="planSubtitle">Review the plan before carrying it into 3D.</p></div>
           <div class="toolbar-actions">
+            <button id="regenSeedBtn" class="tool-button" type="button" title="Generate a fresh layout variation on this footprint">↻ New Variation</button>
             <button id="aiPlanRenderBtn" class="tool-button" type="button">Presentation plan</button>
             <button id="dlSvg" class="tool-button" type="button">SVG</button>
             <button id="dlPng" class="tool-button" type="button">PNG</button>
@@ -164,7 +165,18 @@
         </div>
         <div class="plan-workspace">
           <div class="canvas-column">
-            <div class="canvas-bar"><div id="floorBar" class="floor-tabs" role="tablist" aria-label="Plan floors"></div><span class="canvas-note">Scroll or pinch to inspect · dimensions in metres</span></div>
+            <div class="canvas-bar">
+              <div id="floorBar" class="floor-tabs" role="tablist" aria-label="Plan floors"></div>
+              <div class="canvas-controls">
+                <div class="zoom-group" role="group" aria-label="Blueprint zoom controls">
+                  <button id="zoomOutBtn" class="zoom-btn" type="button" title="Zoom out">−</button>
+                  <button id="zoomResetBtn" class="zoom-btn zoom-readout" type="button" title="Reset zoom">100%</button>
+                  <button id="zoomInBtn" class="zoom-btn" type="button" title="Zoom in">+</button>
+                </div>
+                <span class="canvas-note">Click any room to inspect · dimensions in metres</span>
+              </div>
+            </div>
+            <div id="selectedRoomBanner" class="selected-room-banner" hidden></div>
             <div id="planHost" class="plan-host" aria-label="Generated floor plan"></div>
           </div>
           <aside class="plan-inspector" aria-label="Plan quality and revisions">
@@ -222,7 +234,7 @@
         </div>
         <div class="visual-workspace">
           <div class="viewer-column">
-            <div class="canvas-bar"><div id="floorBar3d" class="floor-tabs" role="tablist" aria-label="3D floors"></div><span class="canvas-note"><span class="desktop-hint">Orbit: drag to rotate · scroll to zoom</span><span class="walk-hint">Walk: click the scene · WASD · Esc to leave</span></span></div>
+            <div class="canvas-bar"><div id="floorBar3d" class="floor-tabs" role="tablist" aria-label="3D floors"></div><span class="canvas-note"><span class="desktop-hint">Orbit: drag to rotate · scroll to zoom</span> · <span class="walk-hint">Walk: click the scene · WASD · Esc to leave</span></span></div>
             <div id="view3d" class="view3d" aria-label="Interactive 3D house preview"></div>
           </div>
           <aside class="design-inspector" aria-label="Interior design direction">

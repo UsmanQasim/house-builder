@@ -237,3 +237,4 @@ export function formatMoney(amount: number, market: MarketConfig): string {
   const rounded = Math.round(amount);
   return `${market.symbol}${rounded.toLocaleString('en-US')}`;
 }
+

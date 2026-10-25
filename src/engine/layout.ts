@@ -792,7 +792,11 @@ function allocatedSegments(rooms: ProgramRoom[], cross: number, total: number, r
   const base = (needs as number[]).reduce((s, n) => s + n, 0);
   if (base > total + EPS) return null;
   const extra = Math.max(0, total - base);
-  const weights = ordered.map((r, i) => Math.max(0.15, r.targetArea / cross - (needs[i] as number)) + 0.12 + rng() * 0.3);
+  const weights = ordered.map((r, i) => {
+    if (r.type === 'bathroom') return 0.04 + rng() * 0.04;
+    if (r.type === 'room' && r.targetArea <= 9) return 0.08 + rng() * 0.08;
+    return Math.max(0.18, r.targetArea / cross - (needs[i] as number)) + 0.15 + rng() * 0.3;
+  });
   const weightSum = weights.reduce((s, n) => s + n, 0);
   const out = ordered.map((room, i) => ({ room, length: (needs[i] as number) + extra * weights[i] / weightSum }));
   // Absorb floating-point drift in the final segment so the footprint tiles exactly.
@@ -816,7 +820,11 @@ function addOpenCorridor(floor: Floor, name: string, x: number, y: number, w: nu
 function verticalFloor(fi: number, assigned: ProgramRoom[], c: Spec, foot: Rect, cw: number, ratio: number, rng: Rng): Floor | null {
   const leftW = (foot.w - cw) * ratio, rightW = foot.w - cw - leftW;
   if (leftW < MIN.corridor.w || rightW < MIN.corridor.w) return null;
-  const split = splitBins(assigned, [{ capacity: foot.h, cross: leftW }, { capacity: foot.h, cross: rightW }], rng);
+  const narrowBin: 0 | 1 | null = Math.abs(leftW - rightW) > 0.45 ? (leftW < rightW ? 0 : 1) : null;
+  const split = (narrowBin != null
+    ? splitBins(assigned, [{ capacity: foot.h, cross: leftW }, { capacity: foot.h, cross: rightW }], rng,
+        r => (r.type === 'bathroom' && Math.min(leftW, rightW) >= r.minW) ? narrowBin : null)
+    : null) || splitBins(assigned, [{ capacity: foot.h, cross: leftW }, { capacity: foot.h, cross: rightW }], rng);
   if (!split) return null;
   const floor: Floor = { index: fi, rooms: [], corridor: null, entrance: null, stairs: null };
   const hallX = foot.x + leftW;
@@ -865,11 +873,24 @@ function candidateQuality(layout: Layout, program: ProgramRoom[], rng: Rng): num
   let score = coverage(layout) * 72 - (corridors / Math.max(1, fa)) * 18;
   const habitable = layout.floors.flatMap(f => f.rooms).filter(r => ['living', 'bedroom', 'kitchen', 'dining'].includes(r.type));
   score += habitable.filter(r => r.windows.length > 0).length / Math.max(1, habitable.length) * 12;
-  layout.floors.forEach(fl => {
-    const kitchen = fl.rooms.find(r => r.type === 'kitchen'), dining = fl.rooms.find(r => r.type === 'dining');
+  layout.floors.forEach((fl, fi) => {
+    const kitchen = fl.rooms.find(r => r.type === 'kitchen'), dining = fl.rooms.find(r => r.type === 'dining'), living = fl.rooms.find(r => r.type === 'living');
     if (kitchen && dining && sharedSpan(kitchen, dining)) score += 6;
+    if (living && dining && sharedSpan(living, dining)) score += 4;
+    if (living && Math.abs(living.y + living.h - (layout.foot.y + layout.foot.h)) < EPS * 4) score += 3;
     const garage = fl.rooms.find(r => r.type === 'garage');
-    if (garage && Math.abs(garage.y + garage.h - (layout.foot.y + layout.foot.h)) < EPS * 4) score += 3;
+    if (garage) {
+      if (fi === 0 && Math.abs(garage.y + garage.h - (layout.foot.y + layout.foot.h)) < EPS * 4) score += 8;
+      else score -= 18;
+    }
+    const master = fl.rooms.find(r => r.type === 'bedroom' && /master/i.test(r.name));
+    const bath = fl.rooms.find(r => r.type === 'bathroom');
+    if (master && bath && sharedSpan(master, bath)) score += 4;
+    fl.rooms.filter(r => r.type !== 'corridor').forEach(r => {
+      const aspect = Math.max(r.w, r.h) / Math.max(0.5, Math.min(r.w, r.h));
+      if (aspect > 2.35) score -= (aspect - 2.35) * 4;
+      if (r.type === 'bathroom' && r.area > 11.5) score -= (r.area - 11.5) * 1.6;
+    });
   });
   const actual = new Map<string, number>(); layout.floors.flatMap(f => f.rooms).forEach(r => actual.set(r.name, r.area));
   program.forEach(r => { const a = actual.get(r.name) || 0; score -= Math.min(3, Math.abs(a - r.targetArea) / Math.max(1, r.targetArea)); });
@@ -884,8 +905,8 @@ function makeCandidate(c: Spec, foot: Rect, seed: number, index: number): Candid
   const floors: Floor[] = [];
   let corridorX = foot.x + foot.w / 2, corridorW = cw;
   if (vertical) {
-    const variants = [0.24, 0.31, 0.39, 0.47, 0.53, 0.61, 0.69, 0.76];
-    const ratio = clamp(variants[(index + (seed % variants.length)) % variants.length] + (rng() - 0.5) * 0.035, 0.2, 0.8);
+    const variants = [0.35, 0.40, 0.45, 0.48, 0.52, 0.55, 0.60, 0.65];
+    const ratio = clamp(variants[(index + (seed % variants.length)) % variants.length] + (rng() - 0.5) * 0.035, 0.33, 0.67);
     for (let fi = 0; fi < c.floors; fi++) { const fl = verticalFloor(fi, assigned[fi], c, foot, cw, ratio, rng); if (!fl) return null; floors.push(fl); }
     corridorX = floors[0].corridor!.x; corridorW = floors[0].corridor!.w;
   } else {
@@ -952,7 +973,7 @@ export function computeLayout(c: Spec, seedOverride?: number): Layout {
   const requestedSeed = seedOverride ?? c.seed;
   const seed = Number.isFinite(requestedSeed) ? (Math.floor(requestedSeed as number) >>> 0) : (Math.floor(Math.random() * 4294967296) >>> 0);
   const { fw, fh, fx, fy } = sizedFootprint(c), foot = { x: fx, y: fy, w: fw, h: fh };
-  const attempts = 56, valid: Candidate[] = [];
+  const attempts = 72, valid: Candidate[] = [];
   let bestAny: Candidate | null = null;
   for (let i = 0; i < attempts; i++) {
     const cand = makeCandidate(c, foot, seed, i);

@@ -344,7 +344,8 @@ export class Viewer {
         const cast = ['wall', 'furn', 'roof', 'roofpitch', 'trim', 'tree', 'door', 'plinth', 'hedge', 'shrub', 'curtain', 'art'].includes(it.t);
         m.castShadow = cast;
         m.receiveShadow = !['glass', 'lamp', 'tree', 'curtain'].includes(it.t);
-        if (it.t === 'roof' || it.t === 'roofpitch') this.roof.add(m);
+        const yTop = L.floors.length * (d.wallH + d.slab);
+        if (it.t === 'roof' || it.t === 'roofpitch' || (it.t === 'trim' && it.floor < 0 && it.y >= yTop - 0.2)) this.roof.add(m);
         else if (it.t === 'ceil') { m.userData.floor = it.floor; this.ceil.push(m as THREE.Mesh); this.root.add(m); }
         else if (it.floor >= 0) this.fg(it.floor).add(m);
         else this.root.add(m);
@@ -384,13 +385,64 @@ export class Viewer {
   setFloor(f: number): void { this.floor = f; if (this.mode === 'walk') this.spawn(); this.vis(); }
   setCutaway(b: boolean): void { this.cut = b; this.vis(); }
 
-  /** Capture the exact canonical 3D design so AI renders can stay tied to the
-   * project instead of inventing an unrelated house from text alone. */
   captureDataURL(): string {
     if (!this.renderer || !this.scene || !this.camera) throw new Error('The 3D scene is not ready yet.');
     if (this.composer) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
     return this.renderer.domElement.toDataURL('image/png');
+  }
+
+  /** Capture a custom camera viewpoint in the 3D scene and restore the active camera afterwards. */
+  captureViewAngle(preset: string): string {
+    if (!this.renderer || !this.scene || !this.camera || !this.desc) throw new Error('The 3D scene is not ready yet.');
+    const oldPos = this.camera.position.clone();
+    const oldQuat = this.camera.quaternion.clone();
+    const oldCut = this.cut;
+    const oldFloor = this.floor;
+
+    try {
+      const span = Math.max(this.desc.plotW, this.desc.plotD);
+      const h = this.desc.wallH * this.desc.floors * 0.42;
+      const v = preset.toLowerCase();
+
+      if (/garden|back|rear/.test(v)) {
+        this.setCutaway(false);
+        this.camera.position.set(-span * 0.88, span * 0.65, -span * 1.05);
+        this.camera.lookAt(0, h, 0);
+      } else if (/front|exterior|hero/.test(v)) {
+        this.setCutaway(false);
+        this.camera.position.set(span * 0.85, span * 0.58, span * 1.12);
+        this.camera.lookAt(0, h * 0.9, 0);
+      } else {
+        // Interior room doll-house / cutaway perspective
+        this.setFloor(0);
+        this.setCutaway(true);
+        if (/kitchen|dining/.test(v)) {
+          this.camera.position.set(span * 0.62, this.desc.wallH * 2.85, span * 0.62);
+          this.camera.lookAt(0, this.desc.wallH * 0.25, 0);
+        } else if (/bedroom|suite/.test(v)) {
+          const topFl = Math.max(0, this.desc.floors - 1);
+          this.setFloor(topFl);
+          const yB = topFl * (this.desc.wallH + this.desc.slab);
+          this.camera.position.set(-span * 0.62, yB + this.desc.wallH * 2.85, span * 0.62);
+          this.camera.lookAt(0, yB + this.desc.wallH * 0.25, 0);
+        } else {
+          this.camera.position.set(-span * 0.45, this.desc.wallH * 2.95, span * 0.72);
+          this.camera.lookAt(0, this.desc.wallH * 0.25, 0);
+        }
+      }
+
+      if (this.composer) this.composer.render();
+      else this.renderer.render(this.scene, this.camera);
+      return this.renderer.domElement.toDataURL('image/png');
+    } finally {
+      this.camera.position.copy(oldPos);
+      this.camera.quaternion.copy(oldQuat);
+      this.setFloor(oldFloor);
+      this.setCutaway(oldCut);
+      if (this.composer) this.composer.render();
+      else this.renderer.render(this.scene, this.camera);
+    }
   }
 
   /** Export the generated house as a binary glTF asset. The export contains

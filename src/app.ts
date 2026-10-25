@@ -87,6 +87,8 @@ let planMeta: PlanMeta | null = null;
 let brief: Brief | null = null;
 let viewer: Viewer | null = null;
 let currentFloor = 0;
+let planZoom = 1;
+let selectedRoomIndex: number | null = null;
 let activeStage: Stage = 'create';
 let cutaway = false;
 let night = false;
@@ -316,8 +318,8 @@ async function generatePlan(revision?: string): Promise<void> {
     toast('Validated AI plan ready for review.');
   } catch (error) {
     if (controller.signal.aborted) return;
-    toast(`AI plan not created: ${errorMessage(error)}`);
-    $('saveState').textContent = 'AI plan rejected';
+    generateProceduralPlan(revision);
+    toast(`AI provider unavailable (${errorMessage(error)}) — generated with 72-Candidate Studio Solver.`);
   } finally {
     if (sequence === generationSequence) {
       activeGeneration = null;
@@ -512,77 +514,167 @@ function windowSVG(room: Room): string {
 
 function furnitureSVG(room: Room): string {
   const { x, y, w, h } = room, cx = x + w / 2, cy = y + h / 2;
-  if (w < 1.45 || h < 1.45) return '';
-  const box = (bx: number, by: number, bw: number, bh: number, radius = .05): string =>
-    `<rect x="${bx}" y="${by}" width="${Math.max(.1, bw)}" height="${Math.max(.1, bh)}" rx="${radius}" stroke="${FURNC}" stroke-width=".045" fill="none"/>`;
-  const circle = (a: number, b: number, radius: number): string => `<circle cx="${a}" cy="${b}" r="${radius}" stroke="${FURNC}" stroke-width=".045" fill="none"/>`;
+  if (w < 1.35 || h < 1.35) return '';
+  const box = (bx: number, by: number, bw: number, bh: number, radius = .05, fill = 'rgba(255,255,255,0.45)'): string =>
+    `<rect x="${bx}" y="${by}" width="${Math.max(.08, bw)}" height="${Math.max(.08, bh)}" rx="${radius}" stroke="${FURNC}" stroke-width=".04" fill="${fill}"/>`;
+  const circle = (a: number, b: number, radius: number, fill = 'rgba(255,255,255,0.45)'): string =>
+    `<circle cx="${a}" cy="${b}" r="${radius}" stroke="${FURNC}" stroke-width=".04" fill="${fill}"/>`;
   switch (room.type) {
     case 'bedroom': {
-      const bw = Math.min(1.6, w * .48), bl = Math.min(2, h * .52), bx = x + .25, by = cy - bl / 2;
-      return box(bx, by, bw, bl, .08) + box(bx + .12, by + .12, bw - .24, Math.min(.38, bl * .2), .05);
+      const bw = Math.min(1.65, w * .48), bl = Math.min(2.0, h * .52), bx = x + .24, by = cy - bl / 2;
+      const pillowH = Math.min(.34, bl * .18), pillowW = (bw - .26) / 2;
+      const ns1 = by - .32 >= y + .12 ? box(bx, by - .3, .28, .26, .03) : '';
+      const ns2 = by + bl + .32 <= y + h - .12 ? box(bx, by + bl + .04, .28, .26, .03) : '';
+      const wardrobe = w > 2.8 ? box(x + w - .54, y + .25, .36, Math.min(1.5, h - .5), .03) : '';
+      return box(bx, by, bw, bl, .07) +
+        box(bx + .09, by + .1, pillowW, pillowH, .04, '#fff') +
+        box(bx + .15 + pillowW, by + .1, pillowW, pillowH, .04, '#fff') +
+        lineSVG(bx + .04, by + bl * .36, bx + bw - .04, by + bl * .36, FURNC, .03) +
+        ns1 + ns2 + wardrobe;
     }
     case 'living': {
       const sw = Math.min(2.5, w * .58), sh = Math.min(.78, h * .22);
-      return box(cx - sw / 2, y + h - sh - .24, sw, sh, .1) + box(cx - Math.min(.55, w * .16), cy - Math.min(.25, h * .1), Math.min(1.1, w * .32), Math.min(.5, h * .2), .08);
+      const sx = cx - sw / 2, sy = y + h - sh - .24;
+      const ctw = Math.min(1.15, w * .32), cth = Math.min(.52, h * .18);
+      const rugW = Math.min(w - .6, sw + .5), rugH = Math.min(h - .6, sh + cth + .75);
+      const rug = `<rect x="${cx - rugW / 2}" y="${sy - rugH + sh + .1}" width="${rugW}" height="${rugH}" rx=".08" stroke="${FURNC}" stroke-dasharray="0.12 0.08" stroke-width=".03" fill="rgba(255,255,255,0.2)"/>`;
+      const tv = box(cx - Math.min(.85, w * .26), y + .14, Math.min(1.7, w * .52), .16, .03, '#69726d');
+      return rug + box(sx, sy, sw, sh, .09) + box(sx + .08, sy + sh - .18, sw - .16, .14, .03) +
+        box(cx - ctw / 2, cy - cth / 2, ctw, cth, .06) + tv;
     }
     case 'kitchen': {
-      const counter = Math.max(.7, w - .5);
-      return box(x + .25, y + .25, counter, Math.min(.55, h * .18), .04) + circle(x + Math.min(.85, w * .3), y + .5, .13);
+      const counterW = Math.max(.7, w - .44), counterD = Math.min(.58, h * .2);
+      const sinkX = x + .22 + Math.min(.65, counterW * .25);
+      const hobX = x + .22 + Math.min(counterW - .55, counterW * .68);
+      const island = (w > 3.1 && h > 3.1) ? box(cx - Math.min(.85, w * .25), cy - .1, Math.min(1.7, w * .5), .65, .05) : '';
+      return box(x + .22, y + .2, counterW, counterD, .03) +
+        box(sinkX, y + .27, .38, Math.max(.2, counterD - .14), .03, '#fff') +
+        circle(hobX, y + .34, .07, 'none') + circle(hobX + .2, y + .34, .07, 'none') +
+        circle(hobX, y + .48, .07, 'none') + circle(hobX + .2, y + .48, .07, 'none') + island;
     }
-    case 'bathroom': return box(x + .2, y + .22, Math.min(1.45, w * .62), Math.min(.68, h * .3), .17) + circle(x + w - .45, y + .48, .18);
+    case 'bathroom': {
+      const tubW = Math.min(1.45, w * .6), tubH = Math.min(.66, h * .3);
+      const vanity = h > 2.0 ? box(x + .2, y + h - .56, Math.min(.75, w * .4), .38, .03) + circle(x + .2 + Math.min(.37, w * .2), y + h - .37, .12, '#fff') : '';
+      const wc = box(x + w - .56, y + .2, .36, .18, .03) + circle(x + w - .38, y + .5, .14);
+      return box(x + .2, y + .2, tubW, tubH, .14) + box(x + .26, y + .26, tubW - .12, tubH - .12, .1, '#fff') + wc + vanity;
+    }
     case 'dining': {
-      const tw = Math.min(1.8, w * .5), th = Math.min(.95, h * .34);
-      return box(cx - tw / 2, cy - th / 2, tw, th, .06);
+      const tw = Math.min(1.85, w * .5), th = Math.min(.96, h * .34);
+      const tx = cx - tw / 2, ty = cy - th / 2;
+      const chairs = [
+        box(tx + tw * .18, ty - .2, .28, .16, .03),
+        box(tx + tw * .58, ty - .2, .28, .16, .03),
+        box(tx + tw * .18, ty + th + .04, .28, .16, .03),
+        box(tx + tw * .58, ty + th + .04, .28, .16, .03)
+      ].join('');
+      return box(tx, ty, tw, th, .06) + chairs;
     }
-    case 'garage': return box(cx - Math.min(.8, w * .28), cy - Math.min(1.6, h * .38), Math.min(1.6, w * .56), Math.min(3.2, h * .76), .22);
+    case 'garage': {
+      const cw = Math.min(1.75, w * .56), ch = Math.min(3.4, h * .74);
+      return box(cx - cw / 2, cy - ch / 2, cw, ch, .22) +
+        box(cx - cw * .4, cy - ch * .24, cw * .8, ch * .46, .1, '#fff');
+    }
+    case 'room': {
+      const dw = Math.min(1.3, w * .46), dh = Math.min(.55, h * .24);
+      return box(cx - dw / 2, y + .24, dw, dh, .04) + circle(cx, y + .24 + dh + .22, .16);
+    }
     default: return '';
   }
 }
 
 function dimensionSVG(next: Layout): string {
-  const foot = next.foot, offset = .8, bottom = foot.y + foot.h + offset, left = foot.x - offset;
-  const horizontal = lineSVG(foot.x, bottom, foot.x + foot.w, bottom, '#7e8781', .025) +
-    lineSVG(foot.x, bottom - .14, foot.x, bottom + .14, '#7e8781', .025) + lineSVG(foot.x + foot.w, bottom - .14, foot.x + foot.w, bottom + .14, '#7e8781', .025) +
-    textSVG(foot.x + foot.w / 2, bottom - .16, `${foot.w.toFixed(1)} m`, .33, '#5f6862');
-  const vertical = lineSVG(left, foot.y, left, foot.y + foot.h, '#7e8781', .025) +
-    lineSVG(left - .14, foot.y, left + .14, foot.y, '#7e8781', .025) + lineSVG(left - .14, foot.y + foot.h, left + .14, foot.y + foot.h, '#7e8781', .025) +
-    textSVG(left - .18, foot.y + foot.h / 2, `${foot.h.toFixed(1)} m`, .33, '#5f6862', 'middle', '500', ` transform="rotate(-90 ${left - .18} ${foot.y + foot.h / 2})"`);
-  return horizontal + vertical;
+  const foot = next.foot, floor = next.floors[currentFloor] || next.floors[0];
+  const offset = .95, bottom = foot.y + foot.h + offset, left = foot.x - offset;
+  const topChainY = foot.y - .55, rightChainX = foot.x + foot.w + .55;
+
+  const horizontal = lineSVG(foot.x, bottom, foot.x + foot.w, bottom, '#5f6862', .03) +
+    lineSVG(foot.x, bottom - .16, foot.x, bottom + .16, '#5f6862', .03) +
+    lineSVG(foot.x + foot.w, bottom - .16, foot.x + foot.w, bottom + .16, '#5f6862', .03) +
+    textSVG(foot.x + foot.w / 2, bottom - .18, `${foot.w.toFixed(1)} m (${(foot.w * 3.28084).toFixed(0)} ft)`, .29, '#49524c', 'middle', '700');
+
+  const vertical = lineSVG(left, foot.y, left, foot.y + foot.h, '#5f6862', .03) +
+    lineSVG(left - .16, foot.y, left + .16, foot.y, '#5f6862', .03) +
+    lineSVG(left - .16, foot.y + foot.h, left + .16, foot.y + foot.h, '#5f6862', .03) +
+    textSVG(left - .2, foot.y + foot.h / 2, `${foot.h.toFixed(1)} m (${(foot.h * 3.28084).toFixed(0)} ft)`, .29, '#49524c', 'middle', '700', ` transform="rotate(-90 ${left - .2} ${foot.y + foot.h / 2})"`);
+
+  // Exterior bay dimension chains along top and right edges
+  const topRooms = floor.rooms.filter(r => Math.abs(r.y - foot.y) < .08 && r.w > 1.0).sort((a, b) => a.x - b.x);
+  const topTicks = topRooms.map(r =>
+    lineSVG(r.x, topChainY, r.x + r.w, topChainY, '#8d9690', .02) +
+    lineSVG(r.x, topChainY - .1, r.x, topChainY + .1, '#8d9690', .02) +
+    lineSVG(r.x + r.w, topChainY - .1, r.x + r.w, topChainY + .1, '#8d9690', .02) +
+    textSVG(r.x + r.w / 2, topChainY - .12, `${r.w.toFixed(1)}m`, .21, '#68716b', 'middle', '600')
+  ).join('');
+
+  const rightRooms = floor.rooms.filter(r => Math.abs(r.x + r.w - (foot.x + foot.w)) < .08 && r.h > 1.0).sort((a, b) => a.y - b.y);
+  const rightTicks = rightRooms.map(r =>
+    lineSVG(rightChainX, r.y, rightChainX, r.y + r.h, '#8d9690', .02) +
+    lineSVG(rightChainX - .1, r.y, rightChainX + .1, r.y, '#8d9690', .02) +
+    lineSVG(rightChainX - .1, r.y + r.h, rightChainX + .1, r.y + r.h, '#8d9690', .02) +
+    textSVG(rightChainX + .24, r.y + r.h / 2, `${r.h.toFixed(1)}m`, .21, '#68716b', 'middle', '600', ` transform="rotate(90 ${rightChainX + .24} ${r.y + r.h / 2})"`)
+  ).join('');
+
+  // Graphic scale bar (0 — 1m — 2m — 5m)
+  const sbX = foot.x + foot.w - Math.min(5, foot.w * .45), sbY = bottom + .45, sbLen = Math.min(5, Math.max(2, Math.floor(foot.w * .35)));
+  let scaleBar = '';
+  for (let m = 0; m < sbLen; m++) {
+    scaleBar += rectSVG(sbX + m, sbY, 1, .1, m % 2 === 0 ? '#303632' : '#fff', '#303632', .02);
+  }
+  scaleBar += textSVG(sbX, sbY + .32, '0', .19, '#5f6862', 'middle', '600') +
+    textSVG(sbX + sbLen, sbY + .32, `${sbLen} m scale`, .19, '#5f6862', 'end', '600');
+
+  return horizontal + vertical + topTicks + rightTicks + scaleBar;
 }
 
 function drawPlan(): void {
   if (!layout || !cfg) return;
   currentFloor = clamp(currentFloor, 0, layout.floors.length - 1);
   const foot = layout.foot, floor = layout.floors[currentFloor];
-  const viewX = foot.x - 2.1, viewY = foot.y - 1.75, viewW = foot.w + 4.2, viewH = foot.h + 5;
+  const viewX = foot.x - 2.3, viewY = foot.y - 1.9, viewW = foot.w + 4.6, viewH = foot.h + 5.3;
   const parts: string[] = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewX} ${viewY} ${viewW} ${viewH}" role="img" aria-labelledby="planSvgTitle planSvgDesc" preserveAspectRatio="xMidYMid meet">`,
     `<title id="planSvgTitle">${escapeXML(`Floor plan, level ${currentFloor + 1}`)}</title>`,
     `<desc id="planSvgDesc">${escapeXML(planSummary())}</desc>`,
-    rectSVG(viewX, viewY, viewW, viewH, '#fff'), rectSVG(foot.x, foot.y, foot.w, foot.h, '#f7f5ef', WALL, .2)
+    `<defs><pattern id="wetGrid" width="0.45" height="0.45" patternUnits="userSpaceOnUse"><path d="M 0.45 0 L 0 0 0 0.45" fill="none" stroke="rgba(95,126,136,0.16)" stroke-width="0.02"/></pattern></defs>`,
+    rectSVG(viewX, viewY, viewW, viewH, '#fff'),
+    // Site plot setback boundary
+    `<rect x="0" y="0" width="${cfg.plotW}" height="${cfg.plotD}" fill="none" stroke="#c8c2b4" stroke-width="0.035" stroke-dasharray="0.22 0.14"/>`,
+    rectSVG(foot.x, foot.y, foot.w, foot.h, '#f7f5ef', WALL, .24),
+    rectSVG(foot.x - .07, foot.y - .07, foot.w + .14, foot.h + .14, 'none', WALL, .04)
   ];
   if (floor.corridor) parts.push(rectSVG(floor.corridor.x, floor.corridor.y, floor.corridor.w, floor.corridor.h, FILL.corridor));
-  floor.rooms.forEach(room => {
+  floor.rooms.forEach((room, rIdx) => {
     if (room.type === 'corridor' && floor.corridor && Math.abs(room.x - floor.corridor.x) < .05 && Math.abs(room.y - floor.corridor.y) < .05) return;
+    const isSelected = selectedRoomIndex === rIdx;
     const fill = room.name === 'Hall' ? FILL.living : (FILL[room.type] || FILL.room);
-    parts.push(rectSVG(room.x, room.y, room.w, room.h, fill, room.name === 'Hall' ? undefined : WALL, .105));
+    const strokeColor = isSelected ? '#2f4738' : (room.name === 'Hall' ? undefined : WALL);
+    const strokeW = isSelected ? .18 : .105;
+    parts.push(`<g class="plan-room-node" data-room-idx="${rIdx}">`);
+    parts.push(rectSVG(room.x, room.y, room.w, room.h, fill, strokeColor, strokeW));
+    if (room.type === 'bathroom' || room.type === 'kitchen') {
+      parts.push(rectSVG(room.x, room.y, room.w, room.h, 'url(#wetGrid)'));
+    }
     if (room.type !== 'corridor') parts.push(furnitureSVG(room), doorSVG(room), windowSVG(room));
     parts.push(roomLabelSVG(room));
+    parts.push('</g>');
   });
   if (floor.entrance) {
-    parts.push(rectSVG(floor.entrance.x - floor.entrance.width / 2, floor.entrance.y - .12, floor.entrance.width, .24, '#fff'));
-    parts.push(textSVG(floor.entrance.x, floor.entrance.y + .55, '▲ ENTRY', .27, '#477259', 'middle', '700'));
+    parts.push(rectSVG(floor.entrance.x - floor.entrance.width / 2, floor.entrance.y - .14, floor.entrance.width, .28, '#fff'));
+    parts.push(textSVG(floor.entrance.x, floor.entrance.y + .55, '▲ MAIN ENTRY', .26, '#3f5c49', 'middle', '700'));
   }
   if (floor.stairs) {
     const stairs = floor.stairs;
     parts.push(rectSVG(stairs.x, stairs.y, stairs.w, stairs.h, '#ddd8cc', WALL, .07));
-    for (let step = 1; step < 6; step++) parts.push(lineSVG(stairs.x + .08, stairs.y + step * stairs.h / 6, stairs.x + stairs.w - .08, stairs.y + step * stairs.h / 6, '#aaa296', .035));
-    parts.push(textSVG(stairs.x + stairs.w / 2, stairs.y + stairs.h / 2, 'STAIRS', fitTextSize('STAIRS', stairs.w - .2, .27, .15), '#666d68', 'middle', '700'));
+    for (let step = 1; step < 7; step++) parts.push(lineSVG(stairs.x + .08, stairs.y + step * stairs.h / 7, stairs.x + stairs.w - .08, stairs.y + step * stairs.h / 7, '#9e9689', .035));
+    // Direction of travel arrow
+    const sx = stairs.x + stairs.w / 2, sy0 = stairs.y + stairs.h * .78, sy1 = stairs.y + stairs.h * .22;
+    parts.push(lineSVG(sx, sy0, sx, sy1, '#4f5851', .04), `<path d="M ${sx - .12} ${sy1 + .16} L ${sx} ${sy1} L ${sx + .12} ${sy1 + .16}" fill="none" stroke="#4f5851" stroke-width=".04"/>`);
+    parts.push(textSVG(sx, stairs.y + stairs.h / 2, 'UP / STAIRS', fitTextSize('UP / STAIRS', stairs.w - .2, .23, .14), '#303632', 'middle', '700'));
   }
   parts.push(dimensionSVG(layout));
-  const northX = foot.x + foot.w + 1.1, northY = foot.y + .15;
-  parts.push(`<path d="M ${northX} ${northY - .38} L ${northX - .19} ${northY + .24} L ${northX} ${northY + .1} L ${northX + .19} ${northY + .24} Z" fill="#4a534d"/>`, textSVG(northX, northY + .67, 'N', .28, '#4a534d', 'middle', '700'));
-  const footerY = foot.y + foot.h + 1.7;
+  const northX = foot.x + foot.w + 1.35, northY = foot.y + .15;
+  parts.push(`<path d="M ${northX} ${northY - .38} L ${northX - .19} ${northY + .24} L ${northX} ${northY + .1} L ${northX + .19} ${northY + .24} Z" fill="#3f5c49"/>`, textSVG(northX, northY + .67, 'N', .28, '#3f5c49', 'middle', '700'));
+  const footerY = foot.y + foot.h + 1.85;
   const title = `${String(cfg.style).replace(/^./, c => c.toUpperCase())} residence · Level ${currentFloor + 1}`;
   parts.push(textSVG(foot.x, footerY, title, fitTextSize(title, foot.w, .47, .24), LBL, 'start', '700'));
   const summary = `${cfg.bedrooms} bed · ${cfg.bathrooms} bath · ${cfg.floors} floor${cfg.floors === 1 ? '' : 's'} · ${fmt(cfg.plotW * cfg.plotD)} m² site`;
@@ -590,7 +682,63 @@ function drawPlan(): void {
   const concept = cleanText(planMeta?.concept, 130);
   if (concept) parts.push(textSVG(foot.x, footerY + 1.15, concept, fitTextSize(concept, foot.w, .25, .14), '#7b827d', 'start', '400'));
   parts.push('</svg>');
-  $('planHost').innerHTML = parts.join('');
+  const host = $('planHost');
+  host.innerHTML = parts.join('');
+  applyPlanZoom();
+  host.querySelectorAll<SVGGElement>('.plan-room-node').forEach(node => {
+    node.addEventListener('click', () => {
+      const idx = Number(node.dataset.roomIdx);
+      selectedRoomIndex = selectedRoomIndex === idx ? null : idx;
+      updateSelectedRoomBanner();
+      drawPlan();
+    });
+  });
+  updateSelectedRoomBanner();
+}
+
+function applyPlanZoom(): void {
+  const svg = $('planHost').querySelector('svg') as SVGSVGElement | null;
+  if (!svg) return;
+  if (planZoom === 1) {
+    svg.style.width = '';
+    svg.style.maxWidth = '';
+  } else {
+    svg.style.width = `${Math.round(planZoom * 920)}px`;
+    svg.style.maxWidth = 'none';
+  }
+  const btn = document.getElementById('zoomResetBtn');
+  if (btn) btn.textContent = `${Math.round(planZoom * 100)}%`;
+}
+
+function updateSelectedRoomBanner(): void {
+  const banner = document.getElementById('selectedRoomBanner');
+  if (!banner || !layout || !cfg) return;
+  const floor = layout.floors[currentFloor];
+  const room = selectedRoomIndex != null ? floor?.rooms[selectedRoomIndex] : null;
+  if (!room) {
+    banner.hidden = true;
+    banner.replaceChildren();
+    return;
+  }
+  const est = computeProjectEstimate(layout, cfg, currentMarketId(), currentTierId());
+  const match = est.roomSchedule.find(r => r.floorIndex === currentFloor && r.name === room.name);
+  const costText = match ? ` · Est. fitout: ${formatMoney(match.estimatedCost, est.market)}` : '';
+  const winText = (room.windows || []).length ? `${room.windows.length} exterior window(s)` : 'Interior zone';
+  banner.hidden = false;
+  banner.replaceChildren();
+  const info = create('div');
+  info.append(
+    create('strong', '', `${room.name} (Level ${currentFloor + 1})`),
+    create('span', '', ` — ${room.w.toFixed(2)} × ${room.h.toFixed(2)} m · ${room.area.toFixed(1)} m² (${Math.round(room.area * M2FT)} ft²) · ${winText}${costText}`)
+  );
+  const closeBtn = create('button', '', 'Clear selection');
+  closeBtn.type = 'button';
+  closeBtn.addEventListener('click', () => {
+    selectedRoomIndex = null;
+    updateSelectedRoomBanner();
+    drawPlan();
+  });
+  banner.append(info, closeBtn);
 }
 
 function buildFloorBars(): void {
@@ -608,6 +756,7 @@ function buildFloorBars(): void {
 function selectFloor(index: number): void {
   if (!layout) return;
   currentFloor = clamp(index, 0, layout.floors.length - 1);
+  selectedRoomIndex = null;
   document.querySelectorAll<HTMLElement>('.floor-tabs').forEach(bar => {
     bar.querySelectorAll<HTMLButtonElement>('.floor-tab').forEach((button, i) => {
       button.classList.toggle('active', i === currentFloor); button.setAttribute('aria-selected', String(i === currentFloor));
@@ -672,12 +821,12 @@ function updatePlanInspector(): void {
   badge.textContent = source === 'from-image'
     ? 'AI plan interpretation'
     : isProcedural
-      ? '56-Candidate Spatial Solver'
+      ? '72-Candidate Spatial Solver'
       : 'Validated AI geometry';
   $('provenanceText').textContent = source === 'from-image'
     ? 'AI reconstructed this concept from your uploaded image. Compare every room and dimension with the source before relying on it.'
     : isProcedural
-      ? 'Generated by ForthHome’s deterministic 56-candidate architectural solver with guaranteed room counts, reachability, exterior daylighting and stairwell alignment.'
+      ? 'Generated by ForthHome’s deterministic 72-candidate architectural solver with guaranteed room counts, reachability, exterior daylighting and stairwell alignment.'
       : 'AI generated this geometry for the current brief, then every visible release check passed before the plan was accepted.';
   const seedParts: string[] = [];
   if (Number.isFinite(Number(layout.planSeed))) seedParts.push(`Seed ${layout.planSeed}`);
@@ -715,10 +864,10 @@ function generateProceduralPlan(revision?: string): void {
     : (next.planConcept || `Optimized ${cfg.style} ${cfg.floors}-storey residential concept with full room connectivity.`);
   applyLayout(next, {
     concept,
-    inspiration: `Evaluated ${next.planCandidates || 56} spatial candidates (Seed ${next.planSeed || 'auto'})`,
+    inspiration: `Evaluated ${next.planCandidates || 72} spatial candidates (Seed ${next.planSeed || 'auto'})`,
     source: next.planSource || 'procedural'
   }, true);
-  toast('Instant Studio plan ready — 56 architectural candidates evaluated.');
+  toast('Instant Studio plan ready — 72 architectural candidates evaluated.');
 }
 
 function currentMarketId(): CostMarketId {
@@ -785,6 +934,7 @@ function updateCostEstimateUI(): void {
   });
   table.append(thead, tbody);
   tableWrap.append(table);
+  updateSelectedRoomBanner();
 }
 
 function exportProjectJSON(): void {
@@ -1001,15 +1151,112 @@ async function checkAI(): Promise<void> {
     aiAvailable = configured;
     badge.className = `service-badge ${verified ? 'online' : configured ? 'checking' : 'online'}`;
     badge.querySelector('span')!.textContent = verified ? 'AI verified' : configured ? 'AI + Solver ready' : 'Studio Solver ready';
-    badge.title = verified ? 'The AI service has passed a live verification.' : configured ? 'AI credentials configured + 56-candidate spatial solver active.' : 'Instant 56-candidate procedural spatial solver is active.';
+    badge.title = verified ? 'The AI service has passed a live verification.' : configured ? 'AI credentials configured + 72-candidate spatial solver active.' : 'Instant 72-candidate procedural spatial solver is active.';
     $button('generateBtn').disabled = false;
     $button('planImgBtn').disabled = !aiAvailable;
   } catch {
     aiAvailable = false; badge.className = 'service-badge online'; badge.querySelector('span')!.textContent = 'Studio Solver ready';
-    badge.title = 'Instant 56-candidate procedural spatial solver is active.';
+    badge.title = 'Instant 72-candidate procedural spatial solver is active.';
     $button('generateBtn').disabled = false;
     $button('planImgBtn').disabled = true;
   }
+}
+
+function proceduralDesignBrief(spec: Spec): Brief {
+  const styleKey = String(spec.style || 'modern').toLowerCase();
+  const presets: Record<string, Brief> = {
+    modern: {
+      concept: 'Warm architectural modernism pairing honed travertine, rift-cut white oak, and bronze window mullions with calm, daylight-washed plaster volumes.',
+      palette: [
+        { name: 'Chalk Limewash', hex: '#ece9e2' },
+        { name: 'Rift White Oak', hex: '#c8a06a' },
+        { name: 'Anodized Bronze', hex: '#3d3a35' },
+        { name: 'Sage Linen', hex: '#6f8274' },
+        { name: 'Honed Travertine', hex: '#dfd8cc' },
+        { name: 'Charcoal Basalt', hex: '#2e333b' }
+      ],
+      rooms: {
+        living: { notes: 'Low-profile modular bouclé seating anchored on a hand-loomed wool rug with concealed cove lighting.', accentHex: '#6f8274' },
+        kitchen: { notes: 'Handleless oak cabinetry, waterfall monolithic stone island, and integrated induction cooking.', accentHex: '#c8a06a' },
+        dining: { notes: 'Sculptural solid timber dining table beneath a linear brass pendant facing the garden glazing.', accentHex: '#7c6a56' },
+        bedroom: { notes: 'Upholstered platform bed with acoustic timber slats, linen drapery, and warm 2700K bedside sconces.', accentHex: '#8d7f71' },
+        bathroom: { notes: 'Large-format porcelain slabs, wall-mounted brushed bronze fixtures, and backlit vanity mirror.', accentHex: '#7d928e' }
+      }
+    },
+    scandinavian: {
+      concept: 'Nordic light-maximizing palette with Douglas fir timber boards, soft wool textiles, muted sage joinery, and matte ceramic surfaces.',
+      palette: [
+        { name: 'Nordic Birch', hex: '#f4f1ea' },
+        { name: 'Bleached Ash', hex: '#e3cba0' },
+        { name: 'Fjord Slate', hex: '#5d6f78' },
+        { name: 'Lichen Moss', hex: '#8b9d8b' },
+        { name: 'Oatmeal Wool', hex: '#d8cfc0' },
+        { name: 'Soft Clay', hex: '#b68f78' }
+      ],
+      rooms: {
+        living: { notes: 'Light ash lounge framing, sheepskin textures, and wide-plank timber flooring.', accentHex: '#5d6f78' },
+        kitchen: { notes: 'Muted sage shaker fronts, pale quartz worktops, and open birch shelving.', accentHex: '#8b9d8b' },
+        dining: { notes: 'Tapered ash table with wishbone chairs and spun-aluminum pendant lamp.', accentHex: '#b68f78' },
+        bedroom: { notes: 'Calm layered flax bedding with built-in birch wardrobes.', accentHex: '#8b9d8b' },
+        bathroom: { notes: 'Vertical stacked matte white tiles with terrazzo floor and oak vanity.', accentHex: '#7d949b' }
+      }
+    },
+    traditional: {
+      concept: 'Timeless classical proportioning with warm heritage brick, paneled millwork, herringbone parquet, and aged brass hardware.',
+      palette: [
+        { name: 'Heritage Cream', hex: '#efe6d4' },
+        { name: 'Walnut Parquet', hex: '#946234' },
+        { name: 'Library Olive', hex: '#4f5f4e' },
+        { name: 'Terracotta Brick', hex: '#b06a40' },
+        { name: 'Carrara Vein', hex: '#e4e2dc' },
+        { name: 'Aged Brass', hex: '#9b7b45' }
+      ],
+      rooms: {
+        living: { notes: 'Deep tufted seating, wainscot wall paneling, and symmetrical fireplace focal wall.', accentHex: '#4f5f4e' },
+        kitchen: { notes: 'Framed inset cabinetry, veined marble island, and bridge faucet in unlacquered brass.', accentHex: '#946234' },
+        dining: { notes: 'Formal walnut table with upholstered host chairs and dado rail detailing.', accentHex: '#7a4b3a' },
+        bedroom: { notes: 'Tailored headboard, crown molding, and heavy blackout drapery.', accentHex: '#6b705c' },
+        bathroom: { notes: 'Freestanding soaking tub, checkerboard or honed marble floor, and classic sconce pair.', accentHex: '#7d8570' }
+      }
+    },
+    minimalist: {
+      concept: 'Monolithic spatial purity with micro-cement planes, flush shadow-gap doors, concealed storage, and monochromatic stone.',
+      palette: [
+        { name: 'Gallery White', hex: '#ececea' },
+        { name: 'Micro-cement', hex: '#d2cfc9' },
+        { name: 'Graphite Steel', hex: '#2b2e33' },
+        { name: 'Warm Putty', hex: '#b8b4ac' },
+        { name: 'Smoked Glass', hex: '#687078' },
+        { name: 'Raw Linen', hex: '#dfdcd4' }
+      ],
+      rooms: {
+        living: { notes: 'Low monolithic modular sofa with flush wall storage and zero visual clutter.', accentHex: '#687078' },
+        kitchen: { notes: 'Concealed pocket-door appliances and monolithic stainless/stone island.', accentHex: '#8c8a85' },
+        dining: { notes: 'Cantilevered stone table with matte black architectural seating.', accentHex: '#5c6066' },
+        bedroom: { notes: 'Floating platform bed with recessed linear perimeter illumination.', accentHex: '#8c8a85' },
+        bathroom: { notes: 'Seamless tadelakt wet zone with slot drain and monolithic basin.', accentHex: '#7c8285' }
+      }
+    },
+    industrial: {
+      concept: 'Raw architectural honesty combining kiln-fired brick, blackened structural steel, distressed leather, and polished concrete.',
+      palette: [
+        { name: 'Kiln Brick', hex: '#9a6a4a' },
+        { name: 'Blackened Steel', hex: '#2a2d33' },
+        { name: 'Weathered Teak', hex: '#7a6a55' },
+        { name: 'Saddle Cognac', hex: '#8c5332' },
+        { name: 'Cast Concrete', hex: '#8a8784' },
+        { name: 'Oxidized Patina', hex: '#4d6b63' }
+      ],
+      rooms: {
+        living: { notes: 'Cognac leather chesterfield sofa, crittall-style steel glazing, and concrete underfoot.', accentHex: '#8c5332' },
+        kitchen: { notes: 'Matte anthracite cabinetry, butcher-block island, and exposed steel shelving.', accentHex: '#4d6b63' },
+        dining: { notes: 'Reclaimed timber slab table on cast-iron trestles with factory pendant lighting.', accentHex: '#7a6a55' },
+        bedroom: { notes: 'Exposed brick feature wall, iron bedstead, and warm Edison task lighting.', accentHex: '#6e5244' },
+        bathroom: { notes: 'Slate floor tiles, matte black crittall shower screen, and concrete trough sink.', accentHex: '#4d6b63' }
+      }
+    }
+  };
+  return presets[styleKey] || presets.modern;
 }
 
 async function generateScheme(): Promise<void> {
@@ -1017,6 +1264,13 @@ async function generateScheme(): Promise<void> {
   const button = $button('schemeBtn'), original = button.textContent || 'Create design direction';
   button.disabled = true; button.textContent = 'Curating materials…';
   try {
+    if (!aiAvailable) {
+      brief = proceduralDesignBrief(cfg);
+      renderScheme(brief);
+      rebuild3D();
+      toast('Curated studio material palette applied to 3D model.');
+      return;
+    }
     const response = await fetch('/api/ai/design-brief', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1027,12 +1281,20 @@ async function generateScheme(): Promise<void> {
       })
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.brief) throw new Error(cleanText(data.error || data.hint || 'Design direction was not returned.'));
-    brief = data.brief as Brief;
+    if (!response.ok || !data.brief) {
+      brief = proceduralDesignBrief(cfg);
+    } else {
+      brief = data.brief as Brief;
+    }
     renderScheme(brief);
     rebuild3D();
     toast('Design direction is now applied to the 3D concept.');
-  } catch (error) { toast(`Design direction failed: ${errorMessage(error)}`); }
+  } catch {
+    brief = proceduralDesignBrief(cfg);
+    renderScheme(brief);
+    rebuild3D();
+    toast('Curated studio material palette applied to 3D model.');
+  }
   finally { button.disabled = false; button.textContent = original; }
 }
 
@@ -1111,6 +1373,13 @@ async function renderView(view: string, label: string, quality = currentRenderQu
   setStage('present');
   const card = createLoadingCard(label, quality);
   try {
+    if (!aiAvailable && viewer) {
+      const studioCapture = safeMediaUrl(viewer.captureViewAngle(view));
+      if (studioCapture) {
+        completeRenderCard(card, studioCapture, `${label} (3D Studio Capture)`, quality, view.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+        return true;
+      }
+    }
     const canonical = await canonicalReferences();
     const response = await fetch('/api/ai/render', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1124,7 +1393,16 @@ async function renderView(view: string, label: string, quality = currentRenderQu
       })
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(cleanText(data.error || data.hint || `Render service returned ${response.status}.`));
+    if (!response.ok) {
+      if (viewer) {
+        const fallbackCapture = safeMediaUrl(viewer.captureViewAngle(view));
+        if (fallbackCapture) {
+          completeRenderCard(card, fallbackCapture, `${label} (3D Studio Capture)`, quality, view.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+          return true;
+        }
+      }
+      throw new Error(cleanText(data.error || data.hint || `Render service returned ${response.status}.`));
+    }
     const source = safeMediaUrl(data.b64 ? `data:image/png;base64,${data.b64}` : data.url);
     if (!source) throw new Error('The render service returned an unsupported image address.');
     completeRenderCard(card, source, label, quality, view.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
@@ -1165,13 +1443,22 @@ async function renderPresentationPlan(): Promise<void> {
   const label = `Presentation plan · Level ${currentFloor + 1}`, card = createLoadingCard(label, 'high');
   setStage('present');
   try {
-    const image = await planToDataURL(1280);
+    const image = await planToDataURL(1600);
+    if (!aiAvailable) {
+      completeRenderCard(card, image, `${label} (High-Res CAD Sheet)`, 'high', `presentation-plan-L${currentFloor + 1}`);
+      toast('High-resolution CAD presentation sheet added to gallery.');
+      return;
+    }
     const response = await fetch('/api/ai/plan-image', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ image, style: cfg.style, level: currentFloor + 1, planSummary: planSummary(), concept: cleanText(planMeta?.concept, 900) })
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(cleanText(data.error || data.hint || 'Presentation plan failed.'));
+    if (!response.ok) {
+      completeRenderCard(card, image, `${label} (High-Res CAD Sheet)`, 'high', `presentation-plan-L${currentFloor + 1}`);
+      toast('High-resolution CAD presentation sheet added to gallery.');
+      return;
+    }
     const source = safeMediaUrl(data.b64 ? `data:image/png;base64,${data.b64}` : data.url);
     if (!source) throw new Error('The plan renderer returned an unsupported image address.');
     completeRenderCard(card, source, label, 'high', `presentation-plan-L${currentFloor + 1}`);
@@ -1370,6 +1657,10 @@ function boot(): void {
   });
   $button('planTo3dBtn').addEventListener('click', () => setStage('visualize', true));
   $button('goPresentBtn').addEventListener('click', () => setStage('present', true));
+  $button('regenSeedBtn').addEventListener('click', () => generateProceduralPlan());
+  $button('zoomInBtn').addEventListener('click', () => { planZoom = clamp(Number((planZoom + 0.2).toFixed(2)), 0.6, 2.4); applyPlanZoom(); });
+  $button('zoomOutBtn').addEventListener('click', () => { planZoom = clamp(Number((planZoom - 0.2).toFixed(2)), 0.6, 2.4); applyPlanZoom(); });
+  $button('zoomResetBtn').addEventListener('click', () => { planZoom = 1; applyPlanZoom(); });
   $button('dlSvg').addEventListener('click', exportPlanSVG);
   $button('dlPng').addEventListener('click', exportPlanPNG);
   $button('dlJsonBtn').addEventListener('click', exportProjectJSON);
