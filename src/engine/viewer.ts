@@ -13,6 +13,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { describeHouse, PR } from './house3d.js';
+import { buildArchitecturalTreeMesh, buildProceduralFurnitureMesh } from './archMesh.js';
 import type { CollisionBox, Layout, SceneDescription, SceneItem, Spec } from './types.js';
 
 /* ---------- procedural PBR fallback textures (offline-safe) ---------- */
@@ -73,6 +74,7 @@ export class Viewer {
   private interiorLights: THREE.PointLight[] = [];
   private dead = false;
   desc!: SceneDescription;
+  layout!: Layout;
   cfg!: Spec;
   camera!: THREE.PerspectiveCamera;
   renderer!: THREE.WebGLRenderer;
@@ -123,8 +125,13 @@ export class Viewer {
     if (tx && tx !== 'failed' && tx !== 'pending') this.applyReal(kind, { mat, rep });
   }
   private mat(item: SceneItem): THREE.Material {
+    if (item.t === 'glass' && item.color === '#55b8cc') {
+      return this.matCache.poolWater || (this.matCache.poolWater = new THREE.MeshPhysicalMaterial({
+        color: 0x38b2cc, transparent: true, opacity: 0.84, roughness: 0.06, metalness: 0.12, reflectivity: 0.9, side: THREE.DoubleSide
+      }));
+    }
     if (item.t === 'glass') return this.matCache.glass || (this.matCache.glass = new THREE.MeshPhysicalMaterial({
-      color: 0xdaeefc, transparent: true, opacity: 0.22, roughness: 0.04, metalness: 0, transmission: 0.6, ior: 1.5, envMapIntensity: 1.8, side: THREE.DoubleSide }));
+      color: 0xdaeefc, transparent: true, opacity: 0.28, roughness: 0.04, metalness: 0.05, transmission: 0.55, ior: 1.5, envMapIntensity: 1.8, side: THREE.DoubleSide }));
     if (item.t === 'lamp') return this.matCache.lamp || (this.matCache.lamp = new THREE.MeshStandardMaterial({ color: 0xffe9c0, emissive: 0xffe2a8, emissiveIntensity: 0.9, roughness: 0.5 }));
     if (item.t === 'hedge' || item.t === 'shrub') return this.matCache.hedge || (this.matCache.hedge = new THREE.MeshStandardMaterial({ color: 0x43743f, roughness: 1 }));
     if (item.t === 'curtain') {
@@ -267,17 +274,7 @@ export class Viewer {
   }
 
   private treeMesh(it: SceneItem): THREE.Group {
-    const g = new THREE.Group();
-    const trunkH = it.h * 0.38;
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, trunkH, 8), new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 1 }));
-    trunk.position.y = trunkH / 2; trunk.castShadow = true; g.add(trunk);
-    const fol = new THREE.MeshStandardMaterial({ color: new THREE.Color(it.color), roughness: 1 });
-    const fol2 = new THREE.MeshStandardMaterial({ color: 0x4a8048, roughness: 1 });
-    const s1 = new THREE.Mesh(new THREE.IcosahedronGeometry(it.w * 0.62, 1), fol); s1.position.y = trunkH + it.w * 0.5; s1.scale.y = 1.15; s1.castShadow = true; g.add(s1);
-    const s2 = new THREE.Mesh(new THREE.IcosahedronGeometry(it.w * 0.44, 1), fol2); s2.position.set(it.w * 0.3, trunkH + it.w * 0.85, it.w * 0.12); s2.castShadow = true; g.add(s2);
-    const s3 = new THREE.Mesh(new THREE.IcosahedronGeometry(it.w * 0.36, 1), fol2); s3.position.set(-it.w * 0.3, trunkH + it.w * 0.78, -it.w * 0.15); s3.castShadow = true; g.add(s3);
-    g.position.set(it.x, it.y, it.z); g.rotation.y = it.ry || 0;
-    return g;
+    return buildArchitecturalTreeMesh(it);
   }
   private fg(f: number): THREE.Group {
     if (!this.floorGroups[f]) { const g = new THREE.Group(); this.root!.add(g); this.floorGroups[f] = g; }
@@ -299,19 +296,35 @@ export class Viewer {
       undefined,
       () => { this.modelCache[name] = 'failed'; const q = this.mq[name] || []; this.mq[name] = null; q!.forEach(c => c(null)); });
   }
-  /* Strict slot fitting: the model must fit INSIDE the slot box on every axis —
-   * no more oversized furniture clipping through walls. Degenerate models are rejected. */
+  /* High-detail parametric 3D furniture assembly: replaces primitive slot boxes
+   * immediately with multi-part PBR furniture so scenes and GLB exports are always crisp. */
   private tryModel(it: SceneItem, group: THREE.Group): void {
+    const proc = buildProceduralFurnitureMesh(it);
+    if (proc) {
+      if (it.floor >= 0 && (it.model === 'Wardrobe' || it.model === 'Refrigerator' || it.h > 1.25)) {
+        proc.userData = {
+          ...proc.userData,
+          isProcGroup: true,
+          origY: proc.position.y,
+          origH: it.h,
+          yB: it.floor * (this.desc.wallH + this.desc.slab),
+          sliceable: true
+        };
+      }
+      group.add(proc);
+      (this.slotMeshes[it.slot!] || []).forEach(mesh => { mesh.visible = false; });
+      return;
+    }
     this.loadModel(it.model!, proto => {
       if (!proto) return;
       try {
         const m = proto.clone(true);
         let bb = new THREE.Box3().setFromObject(m);
         const size = new THREE.Vector3(); bb.getSize(size);
-        if (size.x < 0.001 || size.y < 0.001 || size.z < 0.001) return; // broken/degenerate mesh — keep procedural
+        if (size.x < 0.001 || size.y < 0.001 || size.z < 0.001) return;
         let sc = Math.min(it.w / size.x, it.d / size.z, (it.h * 1.15) / size.y);
         if (!isFinite(sc) || sc <= 0) return;
-        if (sc > 3) sc = 3; // never blow tiny models up into monsters
+        if (sc > 3) sc = 3;
         m.scale.setScalar(sc);
         bb = new THREE.Box3().setFromObject(m);
         const c = new THREE.Vector3(); bb.getCenter(c);
@@ -334,13 +347,25 @@ export class Viewer {
       this.floorGroups = {}; this.ceil = []; this.roof = new THREE.Group(); this.root.add(this.roof);
       this.slotMeshes = {}; this.modelSlots = [];
 
-      const d = describeHouse(L, cfg); this.desc = d; this.coll = d.collision;
+      const d = describeHouse(L, cfg); this.desc = d; this.layout = L; this.coll = d.collision;
+      const sliceableKinds = new Set(['wall', 'door', 'glass', 'trim', 'curtain', 'art', 'lamp']);
       for (let i = 0; i < d.items.length; i++) {
         const it = d.items[i]; let m: THREE.Object3D;
         if (it.t === 'modelslot') { this.modelSlots.push({ it, group: it.floor >= 0 ? this.fg(it.floor) : this.root }); continue; }
         if (it.t === 'roofpitch') m = this.pyramid(it);
         else if (it.t === 'tree') m = this.treeMesh(it);
         else { const mesh = new THREE.Mesh(this.geo(it), this.mat(it)); mesh.position.set(it.x, it.y, it.z); if (it.ry) mesh.rotation.y = it.ry; m = mesh; }
+        const yB = it.floor >= 0 ? it.floor * (d.wallH + d.slab) : 0;
+        const isTallFurn = it.t === 'furn' && !it.slot && it.floor >= 0 && ((it.y - yB) + it.h / 2 > 1.15);
+        m.userData = {
+          ...m.userData,
+          itemKind: it.t,
+          floor: it.floor,
+          origY: it.y,
+          origH: it.h,
+          yB,
+          sliceable: it.floor >= 0 && (sliceableKinds.has(it.t) || isTallFurn)
+        };
         const cast = ['wall', 'furn', 'roof', 'roofpitch', 'trim', 'tree', 'door', 'plinth', 'hedge', 'shrub', 'curtain', 'art'].includes(it.t);
         m.castShadow = cast;
         m.receiveShadow = !['glass', 'lamp', 'tree', 'curtain'].includes(it.t);
@@ -385,6 +410,32 @@ export class Viewer {
   setFloor(f: number): void { this.floor = f; if (this.mode === 'walk') this.spawn(); this.vis(); }
   setCutaway(b: boolean): void { this.cut = b; this.vis(); }
 
+  setCameraPreset(preset: 'hero' | 'rear' | 'top' | 'dollhouse'): void {
+    if (!this.desc || !this.camera) return;
+    this.setMode('orbit');
+    const span = Math.max(this.desc.plotW, this.desc.plotD);
+    const h = this.desc.wallH * this.desc.floors * 0.4;
+    if (preset === 'hero') {
+      this.setCutaway(false);
+      this.camera.position.set(span * 0.88, span * 0.62, span * 1.12);
+      if (this.orbit) this.orbit.target.set(0, h, 0);
+    } else if (preset === 'rear') {
+      this.setCutaway(false);
+      this.camera.position.set(-span * 0.82, span * 0.58, -span * 1.08);
+      if (this.orbit) this.orbit.target.set(0, h * 0.85, -span * 0.08);
+    } else if (preset === 'top') {
+      this.setCutaway(true);
+      this.camera.position.set(0, span * 1.38, 0.01);
+      if (this.orbit) this.orbit.target.set(0, 0, 0);
+    } else if (preset === 'dollhouse') {
+      this.setCutaway(true);
+      const yB = this.floor * (this.desc.wallH + this.desc.slab);
+      this.camera.position.set(span * 0.62, yB + span * 0.68, span * 0.72);
+      if (this.orbit) this.orbit.target.set(0, yB + 0.5, 0);
+    }
+    if (this.orbit) this.orbit.update();
+  }
+
   captureDataURL(): string {
     if (!this.renderer || !this.scene || !this.camera) throw new Error('The 3D scene is not ready yet.');
     if (this.composer) this.composer.render();
@@ -407,28 +458,41 @@ export class Viewer {
 
       if (/garden|back|rear/.test(v)) {
         this.setCutaway(false);
-        this.camera.position.set(-span * 0.88, span * 0.65, -span * 1.05);
-        this.camera.lookAt(0, h, 0);
+        this.camera.position.set(-span * 0.82, span * 0.58, -span * 1.05);
+        this.camera.lookAt(0, h * 0.85, -span * 0.08);
       } else if (/front|exterior|hero/.test(v)) {
         this.setCutaway(false);
         this.camera.position.set(span * 0.85, span * 0.58, span * 1.12);
         this.camera.lookAt(0, h * 0.9, 0);
       } else {
-        // Interior room doll-house / cutaway perspective
-        this.setFloor(0);
-        this.setCutaway(true);
+        // Interior room doll-house / low-wall cutaway perspective aimed at the target room
+        let targetFl = 0;
+        let targetType = 'living';
         if (/kitchen|dining/.test(v)) {
-          this.camera.position.set(span * 0.62, this.desc.wallH * 2.85, span * 0.62);
-          this.camera.lookAt(0, this.desc.wallH * 0.25, 0);
+          targetFl = 0;
+          targetType = 'kitchen';
         } else if (/bedroom|suite/.test(v)) {
-          const topFl = Math.max(0, this.desc.floors - 1);
-          this.setFloor(topFl);
-          const yB = topFl * (this.desc.wallH + this.desc.slab);
-          this.camera.position.set(-span * 0.62, yB + this.desc.wallH * 2.85, span * 0.62);
-          this.camera.lookAt(0, yB + this.desc.wallH * 0.25, 0);
+          targetFl = Math.max(0, (this.layout?.floors.length || this.desc.floors) - 1);
+          targetType = 'bedroom';
+        }
+        const flObj = this.layout?.floors[targetFl] || this.layout?.floors[0];
+        const room = flObj?.rooms.find(r => r.type === targetType)
+          || (targetType === 'kitchen' ? flObj?.rooms.find(r => r.type === 'dining') : undefined)
+          || flObj?.rooms.find(r => r.type !== 'corridor');
+
+        this.setFloor(targetFl);
+        this.setCutaway(true);
+        const yB = targetFl * (this.desc.wallH + this.desc.slab);
+        if (room) {
+          const rx = room.x + room.w / 2 - this.desc.plotW / 2;
+          const rz = room.y + room.h / 2 - this.desc.plotD / 2;
+          const dist = Math.max(6.2, Math.max(room.w, room.h) * 1.35);
+          const sideX = rx >= 0 ? 1 : -1;
+          this.camera.position.set(rx + sideX * dist * 0.74, yB + dist * 0.86, rz + dist * 0.82);
+          this.camera.lookAt(rx, yB + 0.48, rz);
         } else {
-          this.camera.position.set(-span * 0.45, this.desc.wallH * 2.95, span * 0.72);
-          this.camera.lookAt(0, this.desc.wallH * 0.25, 0);
+          this.camera.position.set(span * 0.58, yB + span * 0.65, span * 0.68);
+          this.camera.lookAt(0, yB + 0.48, 0);
         }
       }
 
@@ -450,7 +514,10 @@ export class Viewer {
    * loaded in the scene, without the editor lights/sky. */
   async exportGLB(): Promise<Blob> {
     if (!this.root) throw new Error('Generate a house before exporting it.');
+    const wasCut = this.cut;
+    if (wasCut) { this.cut = false; this.vis(); }
     const project = this.root.clone(true);
+    if (wasCut) { this.cut = true; this.vis(); }
     project.name = 'ForthHome_Project';
     project.userData = {
       generator: 'ForthHome',
@@ -477,7 +544,43 @@ export class Viewer {
     const ob = this.mode === 'orbit';
     if (this.roof) this.roof.visible = ob && !this.cut;
     this.ceil.forEach(c => { c.visible = ob && !this.cut; });
-    Object.keys(this.floorGroups).forEach(k => { this.floorGroups[+k].visible = (ob && this.cut) ? (+k <= this.floor) : true; });
+    const cutH = 1.05;
+    Object.keys(this.floorGroups).forEach(k => {
+      const fi = +k;
+      const fg = this.floorGroups[fi];
+      fg.visible = (ob && this.cut) ? (fi <= this.floor) : true;
+      const sliceActive = ob && this.cut && fi === this.floor;
+      for (let i = 0; i < fg.children.length; i++) {
+        const m = fg.children[i];
+        const ud = m.userData;
+        if (!ud || !ud.sliceable) continue;
+        if (ud.isProcGroup) {
+          m.scale.y = sliceActive ? Math.min(1, cutH / ud.origH) : 1;
+          continue;
+        }
+        if (sliceActive) {
+          const yMin = ud.origY - ud.origH / 2;
+          const yMax = ud.origY + ud.origH / 2;
+          const yLim = ud.yB + cutH;
+          if (yMin >= yLim - 0.04) {
+            m.visible = false;
+          } else if (yMax > yLim) {
+            m.visible = true;
+            const newH = Math.max(0.08, yLim - yMin);
+            m.scale.y = newH / ud.origH;
+            m.position.y = yMin + newH / 2;
+          } else {
+            m.visible = true;
+            m.scale.y = 1;
+            m.position.y = ud.origY;
+          }
+        } else {
+          m.visible = true;
+          m.scale.y = 1;
+          m.position.y = ud.origY;
+        }
+      }
+    });
   }
   private animate(): void {
     requestAnimationFrame(() => this.animate());

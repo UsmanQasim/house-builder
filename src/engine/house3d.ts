@@ -211,36 +211,77 @@ export function describeHouse(L: Layout, cfg: Spec): SceneDescription {
     wall(fi, 'v', WX(F.x), WZ(F.y), WZ(F.y + F.h), ow.left, yB, P.extTex, P.ext);
     wall(fi, 'v', WX(F.x + F.w), WZ(F.y), WZ(F.y + F.h), ow.right, yB, P.extTex, P.ext);
 
+    // Inter-floor architectural slab band (fascia reveal)
+    if (fi > 0) {
+      const bandH = SLAB + 0.08, bandY = yB - SLAB / 2;
+      box('trim', 0, bandY, WZ(F.y + F.h) + 0.04, F.w + 0.16, bandH, 0.08, P.trim, null, fi);
+      box('trim', 0, bandY, WZ(F.y) - 0.04, F.w + 0.16, bandH, 0.08, P.trim, null, fi);
+      box('trim', WX(F.x) - 0.04, bandY, 0, 0.08, bandH, F.h + 0.16, P.trim, null, fi);
+      box('trim', WX(F.x + F.w) + 0.04, bandY, 0, 0.08, bandH, F.h + 0.16, P.trim, null, fi);
+    }
+
     if (fi === 0 && fl.entrance) {
       const ex = WX(fl.entrance.x), ez = WZ(F.y + F.h), ew = fl.entrance.width;
       box('trim', ex - ew / 2, DOORH / 2, ez, 0.12, DOORH, 0.16, P.trim, null, 0);
       box('trim', ex + ew / 2, DOORH / 2, ez, 0.12, DOORH, 0.16, P.trim, null, 0);
       box('trim', ex, DOORH + 0.06, ez, ew + 0.24, 0.12, 0.16, P.trim, null, 0);
       box('door', ex - ew * 0.02, DOORH / 2, ez + 0.02, ew - 0.16, DOORH - 0.06, 0.06, P.doorLeaf, 'wood', 0);
-      box('roof', ex, DOORH + 0.34, ez + 0.55, ew + 1.0, 0.12, 1.2, P.trim, null, -1);
-      box('furn', ex, 0.12, ez + 0.55, ew + 0.6, 0.16, 0.5, '#b8b3a8', 'concrete', -1);
+      // Vertical brass/bronze pivot pull bar
+      box('trim', ex + ew * 0.26, DOORH * 0.5, ez + 0.065, 0.03, 0.9, 0.03, '#c49f58', null, 0);
+      // Covered portico canopy + twin slender architectural columns + tiered terrace steps
+      const canopyW = ew + 1.4, canopyD = 1.45;
+      box('roof', ex, DOORH + 0.36, ez + canopyD / 2, canopyW, 0.14, canopyD, P.trim, null, -1);
+      box('lamp', ex, DOORH + 0.28, ez + canopyD * 0.45, 0.28, 0.04, 0.28, FURN.lamp, null, 0);
+      box('trim', ex - canopyW / 2 + 0.1, (DOORH + 0.3) / 2, ez + canopyD - 0.12, 0.09, DOORH + 0.3, 0.09, P.trim, null, 0);
+      box('trim', ex + canopyW / 2 - 0.1, (DOORH + 0.3) / 2, ez + canopyD - 0.12, 0.09, DOORH + 0.3, 0.09, P.trim, null, 0);
+      box('furn', ex, 0.11, ez + 0.72, canopyW + 0.2, 0.20, 1.45, '#cdc7bc', 'concrete', -1);
+      box('furn', ex, 0.05, ez + 1.55, canopyW + 0.5, 0.10, 0.45, '#dad4c8', 'concrete', -1);
     }
 
     if (L.partitions) buildPartitions(fl.rooms, fi, yB);
     if (fl.stairs && fi < L.floors.length - 1) {
-      const st = fl.stairs, n = 9, sh = (WALLH + SLAB) / n;
-      for (let s = 0; s < n; s++) box('furn', WX(st.x + st.w / 2), yB + sh / 2 + s * sh, WZ(st.y + 0.35 + s * (st.h - 0.4) / n), st.w - 0.2, sh, (st.h - 0.4) / n + 0.04, FURN.woodL, 'wood', fi);
+      const st = fl.stairs, n = 11, sh = (WALLH + SLAB) / n, stepD = (st.h - 0.35) / n;
+      for (let s = 0; s < n; s++) {
+        const sy = yB + sh * (s + 0.65), sz = WZ(st.y + 0.28 + s * stepD);
+        // Floating oak tread
+        box('furn', WX(st.x + st.w / 2), sy, sz, st.w - 0.16, 0.065, stepD + 0.03, FURN.woodL, 'wood', fi);
+        // Twin steel stringers
+        box('trim', WX(st.x + 0.14), sy - 0.06, sz, 0.05, sh + 0.04, stepD + 0.02, P.trim, null, fi);
+        box('trim', WX(st.x + st.w - 0.14), sy - 0.06, sz, 0.05, sh + 0.04, stepD + 0.02, P.trim, null, fi);
+      }
+      // Glass stair balustrade panel
+      box('glass', WX(st.x + 0.09), yB + WALLH * 0.48, WZ(st.y + st.h / 2), 0.03, 0.85, st.h - 0.4, '#cfe6f2', null, fi);
     }
   }
 
   // roof with eaves + fascia
-  const yTop = L.floors.length * (WALLH + SLAB), F2 = L.foot, ov = 0.6;
+  const yTop = L.floors.length * (WALLH + SLAB), F2 = L.foot, ov = 0.65;
   if (P.roofType === 'pitch') {
     items.push({ t: 'roofpitch', x: 0, y: yTop, z: 0, w: F2.w + 2 * ov, h: Math.min(F2.w, F2.h) * 0.36, d: F2.h + 2 * ov, color: P.roof, tex: P.roofTex, floor: -1, ry: 0, geo: 'box', slot: null });
     box('trim', 0, yTop - 0.04, WZ(F2.y) - ov, F2.w + 2 * ov, 0.16, 0.12, P.trim, null, -1);
     box('trim', 0, yTop - 0.04, WZ(F2.y + F2.h) + ov, F2.w + 2 * ov, 0.16, 0.12, P.trim, null, -1);
   } else {
     box('roof', 0, yTop + 0.13, 0, F2.w + 2 * ov, 0.26, F2.h + 2 * ov, P.roof, P.roofTex, -1);
-    const t = 0.18, h = 0.5, ph = F2.w / 2 + ov, pd2 = F2.h / 2 + ov;
-    box('trim', 0, yTop + 0.3 + h / 2, pd2, F2.w + 2 * ov, h, t, P.trim, null, -1);
-    box('trim', 0, yTop + 0.3 + h / 2, -pd2, F2.w + 2 * ov, h, t, P.trim, null, -1);
-    box('trim', ph, yTop + 0.3 + h / 2, 0, t, h, F2.h + 2 * ov, P.trim, null, -1);
-    box('trim', -ph, yTop + 0.3 + h / 2, 0, t, h, F2.h + 2 * ov, P.trim, null, -1);
+    const t = 0.18, h = 0.48, ph = F2.w / 2 + ov, pd2 = F2.h / 2 + ov;
+    box('trim', 0, yTop + 0.28 + h / 2, pd2, F2.w + 2 * ov, h, t, P.trim, null, -1);
+    box('trim', 0, yTop + 0.28 + h / 2, -pd2, F2.w + 2 * ov, h, t, P.trim, null, -1);
+    box('trim', ph, yTop + 0.28 + h / 2, 0, t, h, F2.h + 2 * ov, P.trim, null, -1);
+    box('trim', -ph, yTop + 0.28 + h / 2, 0, t, h, F2.h + 2 * ov, P.trim, null, -1);
+  }
+
+  // Rear Outdoor Living Terrace + Architectural Plunge Pool
+  const patioW = Math.min(F0.w * 0.86, 9.2), patioD = 2.8, patioZ = WZ(F0.y) - patioD / 2 - 0.05;
+  box('path', 0, 0.05, patioZ, patioW, 0.10, patioD, '#dcd5c7', 'tile', -1);
+  const poolW = Math.min(4.6, patioW * 0.52), poolD = 1.85, poolX = -patioW * 0.18;
+  box('furn', poolX, 0.11, patioZ - 0.1, poolW + 0.28, 0.06, poolD + 0.28, '#f0ede6', null, -1);
+  box('glass', poolX, 0.13, patioZ - 0.1, poolW, 0.05, poolD, '#55b8cc', null, -1);
+  // 2 poolside timber sun loungers
+  const lx0 = poolX + poolW / 2 + 0.75;
+  if (lx0 + 0.9 < patioW / 2) {
+    box('furn', lx0, 0.18, patioZ, 0.68, 0.12, 1.65, FURN.woodL, 'wood', -1);
+    box('furn', lx0, 0.26, patioZ + 0.08, 0.62, 0.06, 1.45, '#f4f2ec', null, -1);
+    box('furn', lx0 + 0.88, 0.18, patioZ, 0.68, 0.12, 1.65, FURN.woodL, 'wood', -1);
+    box('furn', lx0 + 0.88, 0.26, patioZ + 0.08, 0.62, 0.06, 1.45, '#f4f2ec', null, -1);
   }
 
   // landscaping
@@ -331,59 +372,99 @@ export function describeHouse(L: Layout, cfg: Spec): SceneDescription {
     switch (rm.type) {
       case 'bedroom': {
         const ac = accent('bedroom', FURN.rug);
-        const bw = Math.min(1.7, w * 0.62), bl = Math.min(2.1, d * 0.6), bz = backZ(bl), bs = 'bed' + rid;
-        rug(Math.min(w - 0.5, bw + 1.2), Math.min(d - 0.5, bl + 0.8), ac);
+        const bw = Math.min(1.75, w * 0.62), bl = Math.min(2.1, d * 0.6), bz = backZ(bl), bs = 'bed' + rid;
+        rug(Math.min(w - 0.5, bw + 1.4), Math.min(d - 0.5, bl + 1.0), ac);
         P3(bw, 0.4, bl, FURN.wood, 0, bz, 0.2, 'wood', 0, bs);
         P3(bw - 0.1, 0.16, bl * 0.7, FURN.wht, 0, bz + 0.12, 0.5, null, 0, bs);
         P3(bw * 0.4, 0.14, 0.34, ac, -bw * 0.24, -d / 2 + 0.4, 0.62, null, 0, bs); P3(bw * 0.4, 0.14, 0.34, ac, bw * 0.24, -d / 2 + 0.4, 0.62, null, 0, bs);
         P3(bw + 0.2, 1.0, 0.1, FURN.woodL, 0, -d / 2 + cl + 0.05, 0.55, null, 0, bs);
         MS(bs, 'Bed', 0, bz, bw, 0.95, bl, 0);
-        P3(0.45, 0.45, 0.4, FURN.woodL, -bw / 2 - 0.35, -d / 2 + 0.4, 0.24); P3(0.45, 0.45, 0.4, FURN.woodL, bw / 2 + 0.35, -d / 2 + 0.4, 0.24);
-        const wdt = Math.min(2.0, d * 0.55), wz = frontZ(wdt) - 0.1, ws = 'wr' + rid;
+        // Bedside tables with warm reading lamps
+        P3(0.48, 0.46, 0.42, FURN.woodL, -bw / 2 - 0.36, -d / 2 + 0.4, 0.23, 'wood');
+        P3(0.48, 0.46, 0.42, FURN.woodL, bw / 2 + 0.36, -d / 2 + 0.4, 0.23, 'wood');
+        CY(0.18, 0.26, FURN.lamp, -bw / 2 - 0.36, -d / 2 + 0.4, 0.58);
+        CY(0.18, 0.26, FURN.lamp, bw / 2 + 0.36, -d / 2 + 0.4, 0.58);
+        // Architectural wardrobe + reading corner if room allows
+        const wdt = Math.min(2.1, d * 0.56), wz = frontZ(wdt) - 0.1, ws = 'wr' + rid;
         P3(wdt, 2.1, 0.58, FURN.drk, rightX(0.58), wz, 1.05, 'wood', Math.PI / 2, ws); MS(ws, 'Wardrobe', rightX(0.58), wz, 0.58, 2.1, wdt, Math.PI / 2);
+        if (w >= 3.2 && d >= 3.2) {
+          const rcs = 'bch' + rid, bps = 'bplt' + rid;
+          P3(0.58, 0.82, 0.58, ac, leftX(0.65), frontZ(0.65), 0.41, null, Math.PI * 0.75, rcs);
+          MS(rcs, 'Chair', leftX(0.65), frontZ(0.65), 0.62, 0.86, 0.62, Math.PI * 0.75);
+          CY(0.32, 0.38, '#9c6b3f', leftX(0.52), backZ(0.52) + 0.35, 0.19, 'cyl', bps);
+          MS(bps, 'Potted Plant', leftX(0.52), backZ(0.52) + 0.35, 0.72, 1.2, 0.72, 0);
+        }
         break; }
       case 'living': {
         const ac = accent('living', FURN.fab);
-        const sw = Math.min(2.8, w * 0.62), sz = backZ(0.92), ss = 'sofa' + rid;
-        rug(Math.min(w - 0.6, 3.2), Math.min(d - 0.6, 2.2), accent('living', FURN.rug));
-        P3(sw, 0.4, 0.92, ac, 0, sz, 0.2, null, 0, ss); P3(sw, 0.55, 0.2, ac, 0, -d / 2 + cl + 0.1, 0.48, null, 0, ss);
+        // Group conversational zone around room center even in deep living rooms
+        const zoneSpan = Math.min(d - 0.5, 3.8);
+        const sw = Math.min(2.85, w * 0.64), sz = -zoneSpan / 2 + 0.52, ss = 'sofa' + rid;
+        rug(Math.min(w - 0.6, sw + 0.9), Math.min(d - 0.6, zoneSpan * 0.85), accent('living', FURN.rug));
+        P3(sw, 0.4, 0.92, ac, 0, sz, 0.2, null, 0, ss); P3(sw, 0.55, 0.2, ac, 0, sz - 0.36, 0.48, null, 0, ss);
         P3(0.24, 0.55, 0.92, FURN.fabL, -sw / 2 - 0.12, sz, 0.3, null, 0, ss); P3(0.24, 0.55, 0.92, FURN.fabL, sw / 2 + 0.12, sz, 0.3, null, 0, ss);
-        MS(ss, 'Sofa', 0, sz, sw + 0.5, 0.85, 0.95, 0);
-        const ct = Math.min(1.3, sw * 0.6), cs = 'cof' + rid;
-        P3(ct, 0.34, 0.6, FURN.woodL, 0, sz + 1.0, 0.17, 'wood', 0, cs); MS(cs, 'Coffee Table', 0, sz + 1.0, ct, 0.4, 0.6, 0);
-        P3(Math.min(2.0, w * 0.6), 0.45, 0.42, FURN.wood, 0, frontZ(0.42), 0.22, 'wood');
-        P3(Math.min(1.8, w * 0.55), 0.95, 0.06, FURN.black, 0, frontZ(0.06) - 0.02, 1.1);
-        const ps = 'plt' + rid; CY(0.36, 0.42, '#9c6b3f', leftX(0.55), frontZ(0.55), 0.21, 'cyl', ps); box('furn', cx + leftX(0.55), yB + 0.85, cz + frontZ(0.55), 0.85, 0.95, 0.85, FURN.green, null, fi, 0, 'sphere', ps); MS(ps, 'Potted Plant', leftX(0.55), frontZ(0.55), 0.85, 1.35, 0.85, 0);
+        MS(ss, 'Sofa', 0, sz, sw + 0.45, 0.85, 0.95, 0);
+        const ct = Math.min(1.35, sw * 0.58), cs = 'cof' + rid, ctz = sz + 1.02;
+        P3(ct, 0.36, 0.65, FURN.woodL, 0, ctz, 0.18, 'wood', 0, cs); MS(cs, 'Coffee Table', 0, ctz, ct, 0.4, 0.65, 0);
+        // Flanking lounge chair(s) angled toward coffee table
+        if (w >= 3.2) {
+          const lcs1 = 'lchA' + rid;
+          P3(0.62, 0.82, 0.62, FURN.fabL, Math.min(w / 2 - 0.55, sw / 2 + 0.42), ctz + 0.1, 0.41, null, -Math.PI * 0.62, lcs1);
+          MS(lcs1, 'Chair', Math.min(w / 2 - 0.55, sw / 2 + 0.42), ctz + 0.1, 0.64, 0.86, 0.64, -Math.PI * 0.62);
+        }
+        const tvZ = Math.min(frontZ(0.42), sz + zoneSpan - 0.48);
+        P3(Math.min(2.1, w * 0.62), 0.46, 0.42, FURN.wood, 0, tvZ, 0.23, 'wood');
+        P3(Math.min(1.8, w * 0.55), 0.95, 0.06, FURN.black, 0, tvZ + 0.08, 1.08);
+        const ps = 'plt' + rid; CY(0.36, 0.42, '#9c6b3f', leftX(0.55), tvZ - 0.1, 0.21, 'cyl', ps); box('furn', cx + leftX(0.55), yB + 0.85, cz + tvZ - 0.1, 0.85, 0.95, 0.85, FURN.green, null, fi, 0, 'sphere', ps); MS(ps, 'Potted Plant', leftX(0.55), tvZ - 0.1, 0.85, 1.35, 0.85, 0);
         break; }
       case 'kitchen': {
-        const run = Math.min(w - 0.4, 3.6);
+        const run = Math.min(w - 0.4, 3.8);
         P3(run, 0.9, 0.6, FURN.wht, 0, backZ(0.6), 0.45); P3(run, 0.05, 0.64, FURN.steel, 0, backZ(0.64), 0.92);
-        P3(run, 0.7, 0.34, FURN.wood, 0, backZ(0.34), 2.05, 'wood'); P3(0.6, 0.06, 0.5, FURN.black, -run * 0.22, backZ(0.5), 0.95);
-        P3(Math.min(d - 0.6, 2.6), 0.9, 0.6, FURN.wht, leftX(0.6), 0.4, 0.45, null, Math.PI / 2);
-        const fs = 'frg' + rid; P3(0.78, 1.85, 0.72, FURN.met, rightX(0.72), backZ(0.72) + 0.1, 0.95, null, 0, fs); MS(fs, 'Refrigerator', rightX(0.72), backZ(0.72) + 0.1, 0.78, 1.85, 0.72, 0);
-        P3(Math.min(1.7, w * 0.5), 0.9, Math.min(1.0, d * 0.4), FURN.woodL, 0, 0.2, 0.45, 'wood'); P3(Math.min(1.7, w * 0.5), 0.05, Math.min(1.0, d * 0.4), '#d9d2c4', 0, 0.2, 0.92, 'marble');
+        P3(run, 0.7, 0.34, FURN.wood, 0, backZ(0.34), 2.05, 'wood'); P3(0.68, 0.06, 0.5, FURN.black, -run * 0.2, backZ(0.5), 0.95);
+        P3(Math.min(d - 0.6, 2.6), 0.9, 0.6, FURN.wht, leftX(0.6), 0.2, 0.45, null, Math.PI / 2);
+        const fs = 'frg' + rid; P3(0.82, 1.85, 0.74, FURN.met, rightX(0.74), backZ(0.74) + 0.08, 0.95, null, 0, fs); MS(fs, 'Refrigerator', rightX(0.74), backZ(0.74) + 0.08, 0.82, 1.85, 0.74, 0);
+        const islW = Math.min(1.9, w * 0.52), islD = Math.min(0.95, d * 0.34), islZ = 0.22;
+        P3(islW, 0.9, islD, FURN.woodL, 0, islZ, 0.45, 'wood'); P3(islW + 0.08, 0.05, islD + 0.08, '#d9d2c4', 0, islZ, 0.92, 'marble');
+        // Counter bar stools along kitchen island front
+        for (let si = -1; si <= 1; si += 2) {
+          const sts = 'kch' + rid + (si < 0 ? 0 : 1);
+          P3(0.4, 0.78, 0.4, FURN.wood, si * islW * 0.28, islZ + islD / 2 + 0.32, 0.39, 'wood', Math.PI, sts);
+          MS(sts, 'Chair', si * islW * 0.28, islZ + islD / 2 + 0.32, 0.42, 0.82, 0.42, Math.PI);
+        }
         break; }
       case 'bathroom': {
         const bts = 'tub' + rid, tos = 'toi' + rid;
-        P3(Math.min(1.6, w * 0.7), 0.55, 0.74, FURN.wht, 0, backZ(0.74), 0.28, null, 0, bts); MS(bts, 'Bathtub', 0, backZ(0.74), Math.min(1.6, w * 0.7), 0.6, 0.74, 0);
-        P3(0.55, 0.45, 0.42, FURN.wht, rightX(0.42), 0, 0.22, null, Math.PI / 2, tos); MS(tos, 'Toilet', rightX(0.42), 0, 0.42, 0.7, 0.55, Math.PI / 2);
-        P3(0.8, 0.82, 0.5, FURN.woodL, leftX(0.5), frontZ(0.8) - 0.2, 0.41, 'wood', Math.PI / 2);
-        P3(0.06, 0.7, 0.6, FURN.glassc, leftX(0.06), frontZ(0.6) - 0.2, 1.45);
+        P3(Math.min(1.65, w * 0.72), 0.58, 0.76, FURN.wht, 0, backZ(0.76), 0.29, null, 0, bts); MS(bts, 'Bathtub', 0, backZ(0.76), Math.min(1.65, w * 0.72), 0.62, 0.76, 0);
+        P3(0.55, 0.45, 0.42, FURN.wht, rightX(0.42), 0.05, 0.22, null, Math.PI / 2, tos); MS(tos, 'Toilet', rightX(0.42), 0.05, 0.42, 0.72, 0.55, Math.PI / 2);
+        // Floating vanity with vessel sink + backlit mirror
+        const vanL = Math.min(1.1, d * 0.42), vanZ = frontZ(vanL) - 0.15;
+        P3(vanL, 0.52, 0.5, FURN.woodL, leftX(0.5), vanZ, 0.56, 'wood', Math.PI / 2);
+        P3(vanL + 0.04, 0.04, 0.52, '#f2efe9', leftX(0.51), vanZ, 0.84, 'marble', Math.PI / 2);
+        CY(0.36, 0.12, '#ffffff', leftX(0.5), vanZ, 0.91);
+        P3(0.05, 0.78, vanL * 0.85, FURN.glassc, leftX(0.05), vanZ, 1.42);
         break; }
       case 'dining': {
-        const tw = Math.min(2.2, w * 0.5), tl = Math.min(1.2, d * 0.45), dts = 'dtb' + rid;
+        const tw = Math.min(2.2, w * 0.54), tl = Math.min(1.15, d * 0.45), dts = 'dtb' + rid;
         rug(Math.min(w - 0.5, tw + 1.4), Math.min(d - 0.5, tl + 1.4), accent('dining', FURN.rug));
         P3(tw, 0.06, tl, FURN.woodL, 0, 0, 0.75, 'wood', 0, dts);
         CY(0.08, 0.74, FURN.wood, -tw * 0.42, -tl * 0.4, 0.37); CY(0.08, 0.74, FURN.wood, tw * 0.42, -tl * 0.4, 0.37); CY(0.08, 0.74, FURN.wood, -tw * 0.42, tl * 0.4, 0.37); CY(0.08, 0.74, FURN.wood, tw * 0.42, tl * 0.4, 0.37);
         MS(dts, 'Dining Table', 0, 0, tw, 0.78, tl, 0);
-        let ci = 0; for (let ai = -1; ai <= 1; ai += 2) for (let bj = -1; bj <= 1; bj += 2) { const chs = 'ch' + rid + (ci++); P3(0.42, 0.86, 0.42, FURN.wood, ai * tw * 0.34, bj * (tl / 2 + 0.28), 0.43, 'wood', 0, chs); MS(chs, 'Chair', ai * tw * 0.34, bj * (tl / 2 + 0.28), 0.48, 0.9, 0.48, bj < 0 ? 0 : Math.PI); }
-        P3(Math.min(1.8, w * 0.55), 0.85, 0.45, FURN.wood, 0, backZ(0.45), 0.42, 'wood');
+        let ci = 0; for (let ai = -1; ai <= 1; ai += 2) for (let bj = -1; bj <= 1; bj += 2) { const chs = 'ch' + rid + (ci++); P3(0.42, 0.86, 0.42, FURN.wood, ai * tw * 0.32, bj * (tl / 2 + 0.28), 0.43, 'wood', 0, chs); MS(chs, 'Chair', ai * tw * 0.32, bj * (tl / 2 + 0.28), 0.48, 0.9, 0.48, bj < 0 ? 0 : Math.PI); }
+        // Head & foot dining chairs when table is wide enough
+        if (w >= tw + 1.1) {
+          for (const side of [-1, 1]) {
+            const chs = 'ch' + rid + (ci++);
+            P3(0.42, 0.86, 0.42, FURN.wood, side * (tw / 2 + 0.28), 0, 0.43, 'wood', 0, chs);
+            MS(chs, 'Chair', side * (tw / 2 + 0.28), 0, 0.48, 0.9, 0.48, side < 0 ? Math.PI / 2 : -Math.PI / 2);
+          }
+        }
+        P3(Math.min(1.85, w * 0.56), 0.82, 0.44, FURN.wood, 0, backZ(0.44), 0.41, 'wood');
         break; }
       case 'garage': {
         const crs = 'car' + rid;
-        P3(Math.min(1.9, w * 0.5), 0.55, Math.min(4.2, d * 0.72), '#3a4654', 0, 0, 0.5, null, 0, crs); P3(Math.min(1.65, w * 0.45), 0.5, Math.min(2.0, d * 0.34), '#222a33', 0, -d * 0.04, 1.0, null, 0, crs);
-        MS(crs, 'Car', 0, 0, Math.min(1.9, w * 0.5), 1.4, Math.min(4.2, d * 0.72), 0);
-        P3(Math.min(2.4, w * 0.7), 0.9, 0.4, FURN.drk, 0, backZ(0.4), 0.6, 'wood'); break; }
+        P3(Math.min(1.9, w * 0.52), 0.55, Math.min(4.2, d * 0.72), '#3a4654', 0, 0, 0.5, null, 0, crs); P3(Math.min(1.65, w * 0.45), 0.5, Math.min(2.0, d * 0.34), '#222a33', 0, -d * 0.04, 1.0, null, 0, crs);
+        MS(crs, 'Car', 0, 0, Math.min(1.9, w * 0.52), 1.4, Math.min(4.2, d * 0.72), 0);
+        P3(Math.min(2.4, w * 0.7), 0.9, 0.42, FURN.drk, 0, backZ(0.42), 0.45, 'wood'); break; }
       case 'room': {
         const name = rm.name.toLowerCase();
         if (/laundry|utility/.test(name)) {
@@ -399,20 +480,28 @@ export function describeHouse(L: Layout, cfg: Spec): SceneDescription {
           MS(tos, 'Toilet', rightX(0.42), backZ(0.55), 0.42, 0.7, 0.55, Math.PI / 2);
           P3(Math.min(0.9, w * 0.4), 0.82, 0.5, FURN.woodL, leftX(0.5), frontZ(0.7), 0.41, 'wood', Math.PI / 2);
         } else if (/gym|fitness/.test(name)) {
-          rug(Math.min(w - 0.5, 2.2), Math.min(d - 0.5, 1.1), '#56636f');
+          rug(Math.min(w - 0.5, 2.4), Math.min(d - 0.5, 1.4), '#56636f');
           P3(Math.min(1.6, w * 0.55), 0.45, 0.5, FURN.drk, 0, backZ(0.5), 0.3);
-          CY(0.28, 0.1, FURN.black, -0.75, 0.5, 0.08); CY(0.28, 0.1, FURN.black, 0.75, 0.5, 0.08);
+          CY(0.28, 0.1, FURN.black, -0.75, 0.35, 0.08); CY(0.28, 0.1, FURN.black, 0.75, 0.35, 0.08);
         } else if (/prayer|meditation/.test(name)) {
-          rug(Math.min(w - 0.6, 1.4), Math.min(d - 0.6, 2.1), '#8b6d4f');
-          P3(Math.min(w - 0.5, 1.8), 0.8, 0.32, FURN.wood, 0, backZ(0.32), 0.4, 'wood');
+          // Serene sanctuary with woven carpet, layered prayer rugs, mihrab console, and low seating bench
+          rug(Math.min(w - 0.5, 2.8), Math.min(d - 0.5, 2.8), '#c7baa5');
+          box('furn', cx - 0.42, yB + 0.02, cz, 0.72, 0.018, 1.25, '#8b4c39', null, fi);
+          box('furn', cx + 0.42, yB + 0.02, cz, 0.72, 0.018, 1.25, '#3b5c54', null, fi);
+          P3(Math.min(w - 0.6, 1.85), 0.78, 0.34, FURN.wood, 0, backZ(0.34), 0.39, 'wood');
+          P3(Math.min(1.4, d * 0.45), 0.44, 0.42, FURN.woodL, rightX(0.42), 0, 0.22, 'wood', Math.PI / 2);
+          const pps = 'pplt' + rid;
+          CY(0.32, 0.38, '#9c6b3f', leftX(0.52), backZ(0.52) + 0.25, 0.19, 'cyl', pps);
+          MS(pps, 'Potted Plant', leftX(0.52), backZ(0.52) + 0.25, 0.72, 1.2, 0.72, 0);
         } else {
-          // Office/study/flex-room default: desk, storage and a circulation-safe chair.
-          const deskW = Math.min(w - 0.5, 1.8), chairSlot = 'flexchair' + rid;
-          P3(deskW, 0.74, 0.65, FURN.woodL, 0, backZ(0.65), 0.37, 'wood');
-          P3(Math.min(0.9, deskW * 0.55), 0.52, 0.05, FURN.black, 0, backZ(0.65) + 0.02, 1.05);
-          P3(0.52, 0.86, 0.52, FURN.drk, 0, backZ(0.65) + 1.0, 0.43, null, Math.PI, chairSlot);
-          MS(chairSlot, 'Chair', 0, backZ(0.65) + 1.0, 0.52, 0.9, 0.52, Math.PI);
-          P3(Math.min(1.6, w * 0.45), 1.9, 0.36, FURN.wood, rightX(0.36), 0, 0.95, 'wood', Math.PI / 2);
+          // Office/study/flex-room default: desk, storage, reading rug, and ergonomic chair
+          const deskW = Math.min(w - 0.5, 1.85), chairSlot = 'flexchair' + rid, dZ = -Math.min(d / 2 - 0.55, 1.1);
+          rug(Math.min(w - 0.6, 2.4), Math.min(d - 0.6, 2.1), accent('living', FURN.rug));
+          P3(deskW, 0.74, 0.68, FURN.woodL, 0, dZ, 0.37, 'wood');
+          P3(Math.min(0.85, deskW * 0.5), 0.46, 0.04, FURN.black, 0, dZ - 0.12, 0.98);
+          P3(0.52, 0.86, 0.52, FURN.drk, 0, dZ + 0.75, 0.43, null, Math.PI, chairSlot);
+          MS(chairSlot, 'Chair', 0, dZ + 0.75, 0.52, 0.9, 0.52, Math.PI);
+          P3(Math.min(1.65, d * 0.5), 1.9, 0.36, FURN.wood, rightX(0.36), 0, 0.95, 'wood', Math.PI / 2);
         }
         break; }
     }

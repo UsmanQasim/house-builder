@@ -585,7 +585,7 @@ function furnitureSVG(room: Room): string {
 function dimensionSVG(next: Layout): string {
   const foot = next.foot, floor = next.floors[currentFloor] || next.floors[0];
   const offset = .95, bottom = foot.y + foot.h + offset, left = foot.x - offset;
-  const topChainY = foot.y - .55, rightChainX = foot.x + foot.w + .55;
+  const topChainY = currentFloor === 0 ? foot.y - 2.02 : foot.y - .55, rightChainX = foot.x + foot.w + .55;
 
   const horizontal = lineSVG(foot.x, bottom, foot.x + foot.w, bottom, '#5f6862', .03) +
     lineSVG(foot.x, bottom - .16, foot.x, bottom + .16, '#5f6862', .03) +
@@ -630,7 +630,7 @@ function drawPlan(): void {
   if (!layout || !cfg) return;
   currentFloor = clamp(currentFloor, 0, layout.floors.length - 1);
   const foot = layout.foot, floor = layout.floors[currentFloor];
-  const viewX = foot.x - 2.3, viewY = foot.y - 1.9, viewW = foot.w + 4.6, viewH = foot.h + 5.3;
+  const viewX = foot.x - 2.3, viewY = foot.y - 2.6, viewW = foot.w + 4.6, viewH = foot.h + 6.0;
   const parts: string[] = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewX} ${viewY} ${viewW} ${viewH}" role="img" aria-labelledby="planSvgTitle planSvgDesc" preserveAspectRatio="xMidYMid meet">`,
     `<title id="planSvgTitle">${escapeXML(`Floor plan, level ${currentFloor + 1}`)}</title>`,
@@ -638,10 +638,21 @@ function drawPlan(): void {
     `<defs><pattern id="wetGrid" width="0.45" height="0.45" patternUnits="userSpaceOnUse"><path d="M 0.45 0 L 0 0 0 0.45" fill="none" stroke="rgba(95,126,136,0.16)" stroke-width="0.02"/></pattern></defs>`,
     rectSVG(viewX, viewY, viewW, viewH, '#fff'),
     // Site plot setback boundary
-    `<rect x="0" y="0" width="${cfg.plotW}" height="${cfg.plotD}" fill="none" stroke="#c8c2b4" stroke-width="0.035" stroke-dasharray="0.22 0.14"/>`,
+    `<rect x="0" y="0" width="${cfg.plotW}" height="${cfg.plotD}" fill="none" stroke="#c8c2b4" stroke-width="0.035" stroke-dasharray="0.22 0.14"/>`
+  ];
+  if (currentFloor === 0) {
+    // Outdoor Rear Terrace + Architectural Plunge Pool context on Level 1
+    const patW = Math.min(foot.w * 0.84, 9.0), patH = 1.65, patX = foot.x + (foot.w - patW) / 2, patY = foot.y - patH - 0.08;
+    parts.push(`<rect x="${patX}" y="${patY}" width="${patW}" height="${patH}" fill="#f4f1ea" stroke="#b8b0a0" stroke-width="0.035" stroke-dasharray="0.14 0.08"/>`);
+    const poolW = Math.min(4.2, patW * 0.48), poolH = 1.15, poolX = patX + 0.35, poolY = patY + (patH - poolH) / 2;
+    parts.push(rectSVG(poolX, poolY, poolW, poolH, '#cde8ef', '#5b97a8', 0.045));
+    parts.push(textSVG(poolX + poolW / 2, poolY + poolH / 2 + 0.07, 'PLUNGE POOL', 0.19, '#326878', 'middle', '700'));
+    parts.push(textSVG(patX + patW - 0.35, patY + patH / 2 + 0.07, 'GARDEN TERRACE', 0.19, '#7a7367', 'end', '600'));
+  }
+  parts.push(
     rectSVG(foot.x, foot.y, foot.w, foot.h, '#f7f5ef', WALL, .24),
     rectSVG(foot.x - .07, foot.y - .07, foot.w + .14, foot.h + .14, 'none', WALL, .04)
-  ];
+  );
   if (floor.corridor) parts.push(rectSVG(floor.corridor.x, floor.corridor.y, floor.corridor.w, floor.corridor.h, FILL.corridor));
   floor.rooms.forEach((room, rIdx) => {
     if (room.type === 'corridor' && floor.corridor && Math.abs(room.x - floor.corridor.x) < .05 && Math.abs(room.y - floor.corridor.y) < .05) return;
@@ -808,7 +819,8 @@ function deriveQuality(next: Layout, spec: Spec): { score: number; checks: Quali
   ];
   const derived = checks.reduce((total, check) => total + (check.pass ? check.weight : 0), 0);
   const metadataScore = Number(next.planScore);
-  const normalized = Number.isFinite(metadataScore) ? (metadataScore <= 1 ? metadataScore * 100 : metadataScore) : derived;
+  const rawMeta = Number.isFinite(metadataScore) ? (metadataScore <= 1 ? metadataScore * 100 : metadataScore) : derived;
+  const normalized = derived >= 95 ? Math.max(92, Math.min(99, 88 + rawMeta * 0.14)) : (derived * 0.78 + rawMeta * 0.22);
   return { score: Math.round(clamp(normalized, 0, 100)), checks };
 }
 
@@ -1678,6 +1690,14 @@ function boot(): void {
   $button('cutBtn').addEventListener('click', () => {
     cutaway = !cutaway; const button = $button('cutBtn'); button.setAttribute('aria-pressed', String(cutaway)); button.textContent = cutaway ? 'Cutaway on' : 'Cutaway'; viewer?.setCutaway(cutaway);
   });
+  document.querySelectorAll<HTMLButtonElement>('[data-cam-preset]').forEach(btn => btn.addEventListener('click', () => {
+    const preset = (btn.dataset.camPreset || 'hero') as 'hero' | 'rear' | 'top' | 'dollhouse';
+    viewer?.setCameraPreset(preset);
+    cutaway = preset === 'top' || preset === 'dollhouse';
+    const cutButton = $button('cutBtn');
+    cutButton.setAttribute('aria-pressed', String(cutaway));
+    cutButton.textContent = cutaway ? 'Cutaway on' : 'Cutaway';
+  }));
   $button('nightBtn').addEventListener('click', () => {
     night = !night; const button = $button('nightBtn'); button.setAttribute('aria-pressed', String(night)); button.textContent = night ? 'Daylight' : 'Evening'; viewer?.setDayNight(night);
   });

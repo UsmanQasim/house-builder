@@ -793,25 +793,45 @@ function allocatedSegments(rooms: ProgramRoom[], cross: number, total: number, r
   if (base > total + EPS) return null;
   const extra = Math.max(0, total - base);
   const weights = ordered.map((r, i) => {
-    if (r.type === 'bathroom') return 0.04 + rng() * 0.04;
-    if (r.type === 'room' && r.targetArea <= 9) return 0.08 + rng() * 0.08;
-    return Math.max(0.18, r.targetArea / cross - (needs[i] as number)) + 0.15 + rng() * 0.3;
+    if (r.type === 'bathroom') return 0.03 + rng() * 0.03;
+    if (r.type === 'dining') return 0.22 + rng() * 0.12;
+    if (r.type === 'kitchen') return 0.30 + rng() * 0.15;
+    if (r.type === 'room' && r.targetArea <= 10) return 0.08 + rng() * 0.08;
+    if (r.type === 'living') return Math.max(0.55, r.targetArea / cross - (needs[i] as number)) + 0.45 + rng() * 0.25;
+    return Math.max(0.22, r.targetArea / cross - (needs[i] as number)) + 0.18 + rng() * 0.25;
   });
   const weightSum = weights.reduce((s, n) => s + n, 0);
   const out = ordered.map((room, i) => {
     const raw = (needs[i] as number) + extra * weights[i] / weightSum;
     if (room.type === 'bathroom') {
-      const cap = Math.max((needs[i] as number) + 0.35, Math.min(3.1, 11.8 / Math.max(1.5, cross)));
+      const cap = Math.max((needs[i] as number) + 0.25, Math.min(2.8, 9.8 / Math.max(1.5, cross)));
+      return { room, length: Math.min(raw, cap) };
+    }
+    if (room.type === 'dining') {
+      const cap = Math.max((needs[i] as number) + 0.6, Math.min(4.6, 22.0 / Math.max(2.0, cross)));
+      return { room, length: Math.min(raw, cap) };
+    }
+    if (room.type === 'room') {
+      const cap = Math.max((needs[i] as number) + 0.8, Math.min(4.4, Math.max(18.0, room.targetArea * 1.75) / Math.max(2.0, cross)));
       return { room, length: Math.min(raw, cap) };
     }
     return { room, length: raw };
   });
-  // Absorb any leftover length into a non-bathroom room, or leave >1.25m for a gallery when only bathrooms exist.
-  const nonBath = out.filter(x => x.room.type !== 'bathroom');
+  // Absorb any leftover length into expandable primary rooms, or leave >1.25m for a gallery when only capped rooms exist.
+  const expandable = out.filter(x => x.room.type !== 'bathroom' && x.room.type !== 'dining' && x.room.type !== 'room');
+  const fallbackExpand = out.filter(x => x.room.type !== 'bathroom');
+  const pool = expandable.length ? expandable : fallbackExpand;
   const leftover = total - out.reduce((s, x) => s + x.length, 0);
   if (Math.abs(leftover) > 1e-6) {
-    if (nonBath.length) nonBath[nonBath.length - 1].length += leftover;
-    else if (leftover <= 1.25) out[out.length - 1].length += leftover;
+    if (expandable.length) {
+      const share = leftover / expandable.length;
+      expandable.forEach(item => { item.length += share; });
+    } else if (leftover <= 1.6 && pool.length) {
+      const share = leftover / pool.length;
+      pool.forEach(item => { item.length += share; });
+    } else if (leftover <= 1.25) {
+      out[out.length - 1].length += leftover;
+    }
   }
   return out;
 }
@@ -895,60 +915,187 @@ function horizontalFloor(fi: number, assigned: ProgramRoom[], c: Spec, foot: Rec
   return floor;
 }
 
+/** T-Core / Garden-Pavilion Floor Plan:
+ * Places a full-width North Garden Zone (e.g., Living + Dining + Kitchen on L1, or
+ * Master Suite + Bedrooms on L2) across the rear garden wall, while the Central Foyer
+ * & Stair Spine stops at the North Zone instead of slicing the entire house in half. */
+function pavilionFloor(fi: number, assigned: ProgramRoom[], c: Spec, foot: Rect, cw: number, hallRatio: number, northRatio: number, rng: Rng): Floor | null {
+  const northH = clamp(foot.h * northRatio, 3.2, foot.h - 3.6);
+  const southH = foot.h - northH;
+  if (southH < 3.2 || (c.floors > 1 && southH < 2.9)) return null;
+  const leftW = (foot.w - cw) * hallRatio, rightW = foot.w - cw - leftW;
+  if (leftW < 2.2 || rightW < 2.2) return null;
+
+  // Choose 1 to 3 prime rooms for the North Garden Band (never put Garage in the rear garden band)
+  const nonGarage = assigned.filter(r => r.type !== 'garage');
+  if (!nonGarage.length) return null;
+  const northPriority = (r: ProgramRoom): number => {
+    if (r.type === 'living') return 10;
+    if (r.type === 'dining') return 9;
+    if (r.type === 'kitchen') return 8;
+    if (r.type === 'bedroom' && /master/i.test(r.name)) return 10;
+    if (r.type === 'bedroom') return 7;
+    if (r.type === 'room') return 5;
+    return 2;
+  };
+  const sortedForNorth = nonGarage.slice().sort((a, b) => northPriority(b) - northPriority(a) || b.targetArea - a.targetArea);
+  // Ensure at least 2 rooms remain for the South wings whenever assigned has >= 4 rooms
+  const maxForNorth = assigned.length >= 4 ? Math.min(3, assigned.length - 2) : Math.min(2, nonGarage.length);
+  const targetNorthCount = clamp(Math.round(assigned.length * 0.38), 1, Math.max(1, maxForNorth));
+  const northRooms: ProgramRoom[] = [];
+  let northNeedW = 0;
+  for (const r of sortedForNorth) {
+    if (northRooms.length >= targetNorthCount) break;
+    const need = minAlong(r, northH);
+    if (need != null && northNeedW + need <= foot.w + EPS) {
+      northRooms.push(r);
+      northNeedW += need;
+    }
+  }
+  if (!northRooms.length) return null;
+  const northSet = new Set(northRooms);
+  const southRooms = assigned.filter(r => !northSet.has(r));
+
+  const narrowBin: 0 | 1 | null = Math.abs(leftW - rightW) > 0.35 ? (leftW < rightW ? 0 : 1) : null;
+  const southSplit = (narrowBin != null
+    ? splitBins(southRooms, [{ capacity: southH, cross: leftW }, { capacity: southH, cross: rightW }], rng,
+        r => r.type === 'garage' ? 1 : (r.type === 'bathroom' && Math.min(leftW, rightW) >= r.minW ? narrowBin : null))
+    : null) || splitBins(southRooms, [{ capacity: southH, cross: leftW }, { capacity: southH, cross: rightW }], rng, r => r.type === 'garage' ? 1 : null);
+  if (!southSplit) return null;
+
+  const northSegs = allocatedSegments(northRooms, northH, foot.w, rng, false);
+  const leftSegs = allocatedSegments(southSplit[0], leftW, southH, rng, true);
+  const rightSegs = allocatedSegments(southSplit[1], rightW, southH, rng, true);
+  if (!northSegs || !leftSegs || !rightSegs) return null;
+
+  const floor: Floor = { index: fi, rooms: [], corridor: null, entrance: null, stairs: null };
+  const hallX = foot.x + leftW, hallY = foot.y + northH;
+  const main = mk('corridor', fi ? 'Upper Gallery' : 'Foyer & Gallery', hallX, hallY, cw, southH);
+  floor.rooms.push(main);
+  floor.corridor = { x: hallX, y: hallY, w: cw, h: southH };
+
+  // Place North Garden rooms across the rear facade
+  let nx = foot.x;
+  northSegs.forEach(s => {
+    const rm = mk(s.room.type, s.room.name, nx, foot.y, s.length, northH);
+    // If this room overlaps the central spine horizontally, put its door directly into the spine
+    const overlap0 = Math.max(nx, hallX), overlap1 = Math.min(nx + s.length, hallX + cw);
+    if (overlap1 - overlap0 >= 0.75) {
+      setDoor(rm, 'bottom', (overlap0 + overlap1) / 2, Math.min(DOOR, overlap1 - overlap0 - 0.12));
+    } else {
+      setDoor(rm, 'bottom', nx + s.length / 2, Math.min(DOOR, s.length - 0.3));
+    }
+    floor.rooms.push(rm);
+    nx += s.length;
+  });
+  if (foot.x + foot.w - nx > 1.2) {
+    addOpenCorridor(floor, 'North Veranda Hall', nx, foot.y, foot.x + foot.w - nx, northH, 'bottom');
+  }
+
+  // Place South-West wing rooms
+  if (!leftSegs.length) addOpenCorridor(floor, 'West Gallery', foot.x, hallY, leftW, southH, 'right');
+  else {
+    let y = hallY;
+    leftSegs.forEach(s => { addProgramRoom(floor, s.room, foot.x, y, leftW, s.length, 'right'); y += s.length; });
+    if (hallY + southH - y > 1.2) addOpenCorridor(floor, 'West Gallery', foot.x, y, leftW, hallY + southH - y, 'right');
+  }
+
+  // Place South-East wing rooms
+  if (!rightSegs.length) addOpenCorridor(floor, 'East Gallery', hallX + cw, hallY, rightW, southH, 'left');
+  else {
+    let y = hallY;
+    rightSegs.forEach(s => { addProgramRoom(floor, s.room, hallX + cw, y, rightW, s.length, 'left'); y += s.length; });
+    if (hallY + southH - y > 1.2) addOpenCorridor(floor, 'East Gallery', hallX + cw, y, rightW, hallY + southH - y, 'left');
+  }
+
+  if (fi === 0) floor.entrance = { x: hallX + cw / 2, y: foot.y + foot.h, width: FRONT };
+  if (c.floors > 1) floor.stairs = { x: hallX + 0.1, y: hallY + 0.2, w: cw - 0.2, h: Math.min(2.65, southH - 0.4) };
+
+  applyWindows(floor.rooms, foot.x, foot.y, foot.w, foot.h);
+  if (!ensureDoors(floor, foot, fi === 0)) return null;
+  return floor;
+}
+
 function candidateQuality(layout: Layout, program: ProgramRoom[], rng: Rng): number {
   const fa = layout.foot.w * layout.foot.h * layout.floors.length;
   const corridors = layout.floors.flatMap(f => f.rooms).filter(r => r.type === 'corridor').reduce((s, r) => s + r.area, 0);
-  let score = coverage(layout) * 72 - (corridors / Math.max(1, fa)) * 18;
+  const corrShare = corridors / Math.max(1, fa);
+  let score = coverage(layout) * 70 - corrShare * 22;
+  if (corrShare > 0.22) score -= (corrShare - 0.22) * 55;
   const habitable = layout.floors.flatMap(f => f.rooms).filter(r => ['living', 'bedroom', 'kitchen', 'dining'].includes(r.type));
-  score += habitable.filter(r => r.windows.length > 0).length / Math.max(1, habitable.length) * 12;
+  score += habitable.filter(r => r.windows.length > 0).length / Math.max(1, habitable.length) * 14;
   layout.floors.forEach((fl, fi) => {
     const kitchen = fl.rooms.find(r => r.type === 'kitchen'), dining = fl.rooms.find(r => r.type === 'dining'), living = fl.rooms.find(r => r.type === 'living');
-    if (kitchen && dining && sharedSpan(kitchen, dining)) score += 6;
-    if (living && dining && sharedSpan(living, dining)) score += 4;
-    if (living && Math.abs(living.y + living.h - (layout.foot.y + layout.foot.h)) < EPS * 4) score += 3;
+    if (kitchen && dining && sharedSpan(kitchen, dining)) score += 7;
+    if (living && dining && sharedSpan(living, dining)) score += 6;
+    if (living && dining && dining.area > living.area * 1.05) score -= 8;
     const garage = fl.rooms.find(r => r.type === 'garage');
     if (garage) {
-      if (fi === 0 && Math.abs(garage.y + garage.h - (layout.foot.y + layout.foot.h)) < EPS * 4) score += 8;
+      if (fi === 0 && Math.abs(garage.y + garage.h - (layout.foot.y + layout.foot.h)) < EPS * 4) score += 9;
       else score -= 18;
     }
     const master = fl.rooms.find(r => r.type === 'bedroom' && /master/i.test(r.name));
     const bath = fl.rooms.find(r => r.type === 'bathroom');
-    if (master && bath && sharedSpan(master, bath)) score += 4;
+    if (master && bath && sharedSpan(master, bath)) score += 5;
+    if (master) {
+      const otherBeds = fl.rooms.filter(r => r.type === 'bedroom' && r !== master);
+      if (otherBeds.some(b => b.area > master.area + 1)) score -= 16;
+    }
     fl.rooms.filter(r => r.type !== 'corridor').forEach(r => {
       const aspect = Math.max(r.w, r.h) / Math.max(0.5, Math.min(r.w, r.h));
-      if (aspect > 2.35) score -= (aspect - 2.35) * 4;
-      if (r.type === 'bathroom' && r.area > 11.5) score -= (r.area - 11.5) * 1.6;
+      if (aspect <= 1.55) score += 1.8;
+      else if (aspect > 1.65) score -= (aspect - 1.65) * 12;
+      if (r.type === 'bathroom' && r.area > 10.5) score -= (r.area - 10.5) * 2.2;
+      if (r.type === 'dining' && r.area > 25) score -= (r.area - 25) * 0.8;
+      if (r.type === 'room' && r.area > 24) score -= (r.area - 24) * 1.4;
+      if (r.type === 'bedroom' && !/master/i.test(r.name) && r.area > 28) score -= (r.area - 28) * 1.2;
+      if (r.area > 40) score -= (r.area - 40) * 1.5;
     });
   });
   const actual = new Map<string, number>(); layout.floors.flatMap(f => f.rooms).forEach(r => actual.set(r.name, r.area));
   program.forEach(r => { const a = actual.get(r.name) || 0; score -= Math.min(3, Math.abs(a - r.targetArea) / Math.max(1, r.targetArea)); });
-  return clamp(score + rng() * 2, 0, 100);
+  return clamp(score + rng() * 1.5, 0, 100);
 }
 
 function makeCandidate(c: Spec, foot: Rect, seed: number, index: number): Candidate | null {
   const rng = seededRng(mixSeed(seed, index));
   const program = roomProgram(c), assigned = assignProgramToFloors(program, c, foot, rng);
-  const cw = 1.2 + rng() * 0.25;
-  const vertical = ((index + (seed & 1)) % 2) === 0;
+  const cw = 1.28 + rng() * 0.24;
+  const mode = (index + (seed % 3)) % 3; // 0 = T-Core Pavilion, 1 = Split-Spine, 2 = Cross-Gallery
   const floors: Floor[] = [];
   let corridorX = foot.x + foot.w / 2, corridorW = cw;
-  if (vertical) {
-    const variants = [0.35, 0.40, 0.45, 0.48, 0.52, 0.55, 0.60, 0.65];
-    const ratio = clamp(variants[(index + (seed % variants.length)) % variants.length] + (rng() - 0.5) * 0.035, 0.33, 0.67);
+  let conceptText = 'T-Core garden pavilion plan with open-concept rear living zone and private wing circulation.';
+
+  if (mode === 0) {
+    const hallVariants = [0.40, 0.44, 0.48, 0.50, 0.52, 0.56, 0.60];
+    const northVariants = [0.33, 0.36, 0.39, 0.42];
+    const hallRatio = clamp(hallVariants[(index + seed) % hallVariants.length] + (rng() - 0.5) * 0.03, 0.36, 0.64);
+    const northRatio = clamp(northVariants[(index + (seed >>> 2)) % northVariants.length] + (rng() - 0.5) * 0.025, 0.30, 0.45);
+    for (let fi = 0; fi < c.floors; fi++) {
+      const fl = pavilionFloor(fi, assigned[fi], c, foot, cw, hallRatio, northRatio, rng);
+      if (!fl) return null;
+      floors.push(fl);
+    }
+    corridorX = floors[0].corridor!.x; corridorW = floors[0].corridor!.w;
+  } else if (mode === 1) {
+    const variants = [0.38, 0.42, 0.46, 0.49, 0.51, 0.54, 0.58, 0.62];
+    const ratio = clamp(variants[(index + (seed % variants.length)) % variants.length] + (rng() - 0.5) * 0.03, 0.36, 0.64);
     for (let fi = 0; fi < c.floors; fi++) { const fl = verticalFloor(fi, assigned[fi], c, foot, cw, ratio, rng); if (!fl) return null; floors.push(fl); }
     corridorX = floors[0].corridor!.x; corridorW = floors[0].corridor!.w;
+    conceptText = 'Balanced central-gallery plan with zoned day and night wings.';
   } else {
-    const variants = [0.34, 0.41, 0.48, 0.55, 0.62, 0.68];
-    const ratio = clamp(variants[(index + (seed % variants.length)) % variants.length] + (rng() - 0.5) * 0.035, 0.28, 0.72);
-    const entryW = clamp(1.22 + rng() * 0.28, 1.2, Math.min(1.55, foot.w * 0.25));
+    const variants = [0.36, 0.42, 0.48, 0.52, 0.58, 0.64];
+    const ratio = clamp(variants[(index + (seed % variants.length)) % variants.length] + (rng() - 0.5) * 0.03, 0.32, 0.68);
+    const entryW = clamp(1.25 + rng() * 0.25, 1.2, Math.min(1.55, foot.w * 0.25));
     const entryLeft = ((index + ((seed >>> 3) & 1)) % 2) === 0;
     for (let fi = 0; fi < c.floors; fi++) { const fl = horizontalFloor(fi, assigned[fi], c, foot, cw, ratio, entryLeft, entryW, rng); if (!fl) return null; floors.push(fl); }
     const stairHall = floors[0].rooms.find(r => r.name === 'Entry Hall'); corridorX = stairHall ? stairHall.x : foot.x; corridorW = entryW;
+    conceptText = 'Cross-axial architectural plan with dedicated entry vestibule and stair core.';
   }
   const layout: Layout = {
     plotW: c.plotW, plotD: c.plotD, foot, corridorX, CW: corridorW, floors, partitions: true,
     planSource: 'procedural', planSeed: seed, planCandidates: 0,
-    planConcept: vertical ? 'Seeded split-hall plan with direct room circulation.' : 'Seeded cross-hall plan with a dedicated entry and stair core.'
+    planConcept: conceptText
   };
   const validation = validateLayout(layout, c);
   const quality = candidateQuality(layout, program, rng);
